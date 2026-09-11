@@ -50,7 +50,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ninja-build patchelf libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0
+          sudo apt-get install -y --no-install-recommends ninja-build patchelf xvfb xauth libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0
       - name: Qt SDK (precompiled, cached)
         uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730
         with:
@@ -87,7 +87,12 @@ jobs:
             $env:PATH = (($env:PATH -split [IO.Path]::PathSeparator) | Where-Object { !$_.StartsWith($qtPath, [StringComparison]::OrdinalIgnoreCase) }) -join [IO.Path]::PathSeparator
           }
           Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH, Env:LD_LIBRARY_PATH -ErrorAction SilentlyContinue
-          & $binary --smoke-test --screenshot smoke.png
+          if ($IsLinux) {
+            $env:QT_QPA_PLATFORM = "xcb"
+            & xvfb-run -a $binary --smoke-test --screenshot smoke.png
+          } else {
+            & $binary --smoke-test --screenshot smoke.png
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path smoke.png)) { throw "Screenshot was not produced" }
       - name: Publish binaries

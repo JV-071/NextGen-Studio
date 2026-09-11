@@ -86,7 +86,15 @@ MainWindow::MainWindow(){
     state_=new QLabel;statusBar()->addWidget(state_,1);statusBar()->addPermanentWidget(new QLabel("DESKTOP NATIVO  ·  0.1"));
     connect(tabs_,&QTabWidget::currentChanged,this,[this]{refresh();});
     connect(tabs_,&QTabWidget::tabCloseRequested,this,&MainWindow::closeTab);
-    QSettings s;restoreGeometry(s.value("window/geometry").toByteArray());restoreState(s.value("window/docks").toByteArray());
+    QSettings s;restoreGeometry(s.value("window/geometry").toByteArray());
+    const bool restored=restoreState(s.value("window/docks").toByteArray());
+    if(!restored) QTimer::singleShot(0,this,[this]{
+        auto* diagnostic=findChild<QDockWidget*>("diagnosticDock");
+        auto* projectDock=findChild<QDockWidget*>("projectDock");
+        auto* propertiesDock=findChild<QDockWidget*>("propertiesDock");
+        resizeDocks({diagnostic},{140},Qt::Vertical);
+        resizeDocks({projectDock,propertiesDock},{250,270},Qt::Horizontal);
+    });
     projectRoot_=s.value("project/root").toString();if(QDir(projectRoot_).exists()&&!projectRoot_.isEmpty())setProject(projectRoot_);
     nativeExecutable_=s.value("preview/executable").toString();
     log_->document()->setMaximumBlockCount(500);
