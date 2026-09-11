@@ -25,10 +25,12 @@ jobs:
           - os: windows-2022
             platform: Windows-x64
             arch: win64_msvc2022_64
+            archives: qtbase
             cache: sccache
           - os: ubuntu-24.04
             platform: Linux-x64
             arch: linux_gcc_64
+            archives: qtbase icu
             cache: ccache
         os: [windows-2022, ubuntu-24.04]
     defaults:
@@ -54,7 +56,7 @@ jobs:
         with:
           version: '6.8.3'
           arch: ${{ matrix.arch }}
-          archives: qtbase
+          archives: ${{ matrix.archives }}
           cache: true
           cache-key-prefix: studio-qt-v1
           install-deps: true
@@ -80,6 +82,11 @@ jobs:
       - name: Packaged application smoke test
         run: |
           $binary = if ($IsWindows) { "./staging/bin/nextgen-studio.exe" } else { "./staging/bin/nextgen-studio" }
+          $qtPath = $env:QT_ROOT_DIR
+          if ($qtPath) {
+            $env:PATH = (($env:PATH -split [IO.Path]::PathSeparator) | Where-Object { !$_.StartsWith($qtPath, [StringComparison]::OrdinalIgnoreCase) }) -join [IO.Path]::PathSeparator
+          }
+          Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH, Env:LD_LIBRARY_PATH -ErrorAction SilentlyContinue
           & $binary --smoke-test --screenshot smoke.png
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path smoke.png)) { throw "Screenshot was not produced" }

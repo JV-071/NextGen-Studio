@@ -12,8 +12,8 @@ int main(int argc,char** argv){
     const bool smoke=app.arguments().contains("--smoke-test");
     if(smoke){QSettings::setDefaultFormat(QSettings::IniFormat);app.setOrganizationName("NextGenTests");}
     studio::MainWindow window;
-    if(smoke){QString error;const bool ok=window.smokeTest(error);window.show();app.processEvents();
-        if(app.arguments().contains("--screenshot")){const int at=app.arguments().indexOf("--screenshot");if(at+1<app.arguments().size())window.grab().save(app.arguments()[at+1]);}
+    if(smoke){QString error;bool ok=window.smokeTest(error);window.show();app.processEvents();
+        if(app.arguments().contains("--screenshot")){const int at=app.arguments().indexOf("--screenshot");if(at+1>=app.arguments().size() || !window.grab().save(app.arguments()[at+1])){ok=false;error="Screenshot could not be written";}}
         QTextStream(stdout)<<(ok?"Desktop smoke passed\n":error+"\n");return ok?0:1;}
     if(argc>1)window.openFile(QString::fromLocal8Bit(argv[1]));else window.openExample();
     window.show();return app.exec();

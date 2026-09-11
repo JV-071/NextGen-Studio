@@ -14,7 +14,10 @@ parser.add_argument("--config", choices=["Debug", "Release"], required=True)
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 stage = root / "staging"
-qt = Path(os.environ.get("QT_ROOT_DIR", os.environ.get("Qt6_DIR", "")))
+qt_path = os.environ.get("QT_ROOT_DIR") or os.environ.get("Qt6_DIR")
+if not qt_path:
+    raise SystemExit("Qt SDK path missing")
+qt = Path(qt_path)
 if not qt.is_dir():
     raise SystemExit("Qt SDK path missing")
 licenses = stage / "licenses" / "Qt"
