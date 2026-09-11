@@ -1,0 +1,103 @@
+name: Desktop builds
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['docs/**', '*.md']
+  pull_request:
+    paths-ignore: ['docs/**', '*.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: ${{ matrix.platform }} / ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+        include:
+          - os: windows-2022
+            platform: Windows-x64
+            arch: win64_msvc2022_64
+            cache: sccache
+          - os: ubuntu-24.04
+            platform: Linux-x64
+            arch: gcc_64
+            cache: ccache
+        os: [windows-2022, ubuntu-24.04]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      QT_QPA_PLATFORM: offscreen
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: x64
+      - name: Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build patchelf libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0
+      - name: Qt SDK (precompiled, cached)
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730
+        with:
+          version: '6.8.3'
+          arch: ${{ matrix.arch }}
+          archives: qtbase
+          cache: true
+          cache-key-prefix: studio-qt-v1
+          install-deps: true
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03
+        with:
+          variant: ${{ matrix.cache }}
+          key: studio-v1-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.config }}-qt6.8.3
+          max-size: 500M
+          save: ${{ github.event_name != 'pull_request' }}
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DCMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.cache }} -DSTUDIO_DEPLOY_RUNTIME=ON -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build/ci --parallel 2
+      - name: Tests
+        run: ctest --test-dir build/ci --output-on-failure --output-junit test-results.xml
+      - name: Install and package
+        run: |
+          cmake --install build/ci --prefix staging
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/package.py --platform ${{ matrix.platform }} --config ${{ matrix.config }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Packaged application smoke test
+        run: |
+          $binary = if ($IsWindows) { "./staging/bin/nextgen-studio.exe" } else { "./staging/bin/nextgen-studio" }
+          & $binary --smoke-test --screenshot smoke.png
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path smoke.png)) { throw "Screenshot was not produced" }
+      - name: Publish binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: NextGen-Studio-${{ matrix.platform }}-${{ matrix.config }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: evidence-${{ matrix.platform }}-${{ matrix.config }}
+          path: |
+            smoke.png
+            build/ci/test-results.xml
+            build/ci/Testing/Temporary/LastTest.log
+          retention-days: 14

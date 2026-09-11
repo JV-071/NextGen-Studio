@@ -1,0 +1,9 @@
+/build/
+/.cache/
+/dist/
+*.user
+*.log
+.DS_Store
+
+/staging/
+/smoke.png

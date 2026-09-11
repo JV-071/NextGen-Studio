@@ -1,0 +1,11 @@
+Module
+  name: dev_studio_bridge
+  description: Development-only NextGen Studio preview bridge
+  author: NextGen Studio contributors
+  sandboxed: true
+  autoload: true
+  autoload-priority: 9999
+  dependencies: [ client_topmenu ]
+  scripts: [ bridge ]
+  @onLoad: init()
+  @onUnload: terminate()

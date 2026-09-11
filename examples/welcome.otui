@@ -1,0 +1,35 @@
+# Exemplo original do NextGen Studio. Edite e salve uma copia.
+MainWindow
+  id: welcomeWindow
+  text: Inventario
+  size: 620 400
+
+  Label
+    id: title
+    text: Seus itens
+    margin-left: 24
+    margin-top: 45
+    size: 200 26
+
+  Panel
+    id: itemList
+    margin-left: 24
+    margin-top: 82
+    size: 350 240
+    background-color: #263746
+
+  Label
+    id: details
+    text: Selecione um item
+    margin-left: 395
+    margin-top: 82
+    size: 200 40
+
+  Button
+    id: useButton
+    text: Usar item
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 24
+    margin-bottom: 24
+    size: 160 34
