@@ -14,32 +14,10 @@ parser.add_argument("--config", choices=["Debug", "Release"], required=True)
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 stage = root / "staging"
-qt_path = os.environ.get("QT_ROOT_DIR") or os.environ.get("Qt6_DIR")
-if not qt_path:
-    raise SystemExit("Qt SDK path missing")
-qt = Path(qt_path)
-if not qt.is_dir():
-    raise SystemExit("Qt SDK path missing")
-licenses = stage / "licenses" / "Qt"
-licenses.mkdir(parents=True, exist_ok=True)
-sources = [qt / "LICENSES", qt / "licenses", qt.parent / "LICENSES", qt / "doc" / "global"]
-copied = 0
-for source in sources:
-    if source.is_dir():
-        for f in source.rglob("*"):
-            if f.is_file() and f.stat().st_size < 2_000_000 and ("license" in f.name.lower() or f.suffix in {".txt", ".html"}):
-                target = licenses / f.relative_to(source)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(f, target)
-                copied += 1
-# Qt binary archives differ in how licenses are laid out. Fetch exact-version texts
-# from the official upstream if the archive did not provide them.
-if copied == 0:
-    import urllib.request
-    for name in ["LGPL-3.0-only.txt", "GPL-3.0-only.txt", "Qt-GPL-exception-1.0.txt"]:
-        url = "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/" + name
-        with urllib.request.urlopen(url, timeout=30) as response:
-            (licenses / name).write_bytes(response.read())
+notices = root / 'licenses'
+if not (notices / 'Qt' / 'inventory.json').is_file():
+    raise SystemExit('Dependency notices missing; run tools/update_notices.py')
+shutil.copytree(notices, stage / 'licenses', dirs_exist_ok=True)
 commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
 (stage / "BUILD.json").write_text(json.dumps({
     "version": "0.1.0", "commit": commit, "platform": args.platform,

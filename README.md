@@ -9,7 +9,7 @@ de desenvolvimento opcional. O editor não distribui o cliente nem recursos do j
 
 ## Usar sem compilar
 
-Em **Actions → Desktop builds**, abra uma execução bem-sucedida e baixe
+Baixe os pacotes permanentes em [Releases](https://github.com/JV-071/NextGen-Studio/releases). Para versões de desenvolvimento, em **Actions → Desktop builds**, abra uma execução bem-sucedida e baixe
 `NextGen-Studio-Windows-x64-Release` ou `NextGen-Studio-Linux-x64-Release`.
 Extraia o ZIP do artefato e o pacote interno. Execute `bin/nextgen-studio.exe`
 no Windows ou `bin/nextgen-studio` no Linux. Mantenha as bibliotecas do pacote.

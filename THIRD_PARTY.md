@@ -18,3 +18,8 @@ No code or game artwork was copied from Assets Editor, Canary Studio, Honey,
 NexaMap, Remere's Map Editor, Redux, or OTClientV8 Offline Map Explorer.
 Reference-project ideas are documented in docs/reference-audit.md.
 Build tools/actions are not linked into the application.
+
+Versioned dependency notices and attribution metadata are bundled in licenses/Qt.
+The inventory records exact upstream source URLs and SHA-256 hashes. These include
+notices for Qt source components that may not all be enabled in a given binary.
+ICU 73 runtime notices are included in licenses/ICU. Refresh using tools/update_notices.py.

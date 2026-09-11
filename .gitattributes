@@ -6,3 +6,5 @@
 *.otui -text
 *.yml text eol=lf
 *.py text eol=lf
+
+licenses/** -text
