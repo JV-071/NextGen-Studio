@@ -1,0 +1,372 @@
+{
+  "date": "2026-09-11",
+  "method": "Selected source evidence; hashes identify local snapshots, not execution or complete audit.",
+  "files": [
+    {
+      "snapshot": "Assets-Editor-main",
+      "path": "Assets Editor/AssetsEditor.csproj",
+      "bytes": 2431,
+      "sha256": "c61dccb8167b392d447af94360be9eca868eba286b66708a338796f57eac3638"
+    },
+    {
+      "snapshot": "Assets-Editor-main",
+      "path": "Assets Editor/images_generator/README.md",
+      "bytes": 2195,
+      "sha256": "dae271e6afc66cc25d8ed771a5ce83d3effdd4f8ac2ac350d96f87e6ceb7cc6e"
+    },
+    {
+      "snapshot": "Assets-Editor-main",
+      "path": "Assets Editor/LuaScript.cs",
+      "bytes": 5534,
+      "sha256": "819249a45ecfdc122d9b28206a498a5df195f63993c1ff354d7e654a17a069d5"
+    },
+    {
+      "snapshot": "Assets-Editor-main",
+      "path": "Assets Editor/LuaWindow.xaml.cs",
+      "bytes": 38923,
+      "sha256": "01d8beda66df643922d47d83491299fcaf6e6119bfc7a420b5df9d5d7203c56f"
+    },
+    {
+      "snapshot": "Assets-Editor-main",
+      "path": "README.md",
+      "bytes": 1743,
+      "sha256": "92b07c85ecbf5baf2832f6148906adf5017b87218a6456e4a337ee2ffec26f36"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "index.html",
+      "bytes": 295,
+      "sha256": "3fc11ad0532f9dd46525304b74b962ccb1b1c469731bf1e95eda458ce41164bc"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "LICENSE",
+      "bytes": 3445,
+      "sha256": "8baf099a72c051c5b76fc6e889fcc905da74f0542ad6612f3cc78872f3e7ebc9"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "package.json",
+      "bytes": 708,
+      "sha256": "35cc60494e5051691accbafb1c5267f609718c70bcfe24f2edc2d7a3ea838ccd"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "README.md",
+      "bytes": 38040,
+      "sha256": "760087829c99369d3d821018a0f2c9e664f0bd2f77fb405cda6f5ae6c3ccf2c4"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "src/history.ts",
+      "bytes": 1217,
+      "sha256": "6580bcf89195d222091dce2530a64202177477e5f4a142745c9d65d4bab41a35"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "src/styles/README.md",
+      "bytes": 2895,
+      "sha256": "328a3b07951289fac9289258b05df55804777a555b715088d2ec680588c0f5ca"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "src/utils/README.md",
+      "bytes": 5149,
+      "sha256": "cc5c9676dc8ff99f5d2d741be70ac8f6ac7354debccfdf2c03b70281ccf6c65f"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "src/utils/virtualScroll.ts",
+      "bytes": 4695,
+      "sha256": "3761e7916590388a341aa947467dc4a32116b1a4db660b31330e9e52da292831"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "src-tauri/Cargo.toml",
+      "bytes": 2129,
+      "sha256": "33bd080b6e29b11f1a5d4ac2e95cf316da0f881b426c43a5dfdf99d8a0f5cda8"
+    },
+    {
+      "snapshot": "Beats-Assets-Editor-main",
+      "path": "src-tauri/src/core/fs_util.rs",
+      "bytes": 1519,
+      "sha256": "7bf5751cb2635699b2c084787faee074c084c9679ed6041f5365a9a8137274ab"
+    },
+    {
+      "snapshot": "Honey_2_1",
+      "path": "bulkEditor.module.js",
+      "bytes": 52342,
+      "sha256": "85dc48a475bfca8f8d229df04d63c9d1e493fed89a2f0e341a5798f9e2e6cf68"
+    },
+    {
+      "snapshot": "Honey_2_1",
+      "path": "editor.js",
+      "bytes": 157919,
+      "sha256": "b1dbaf11802e0e008beedd9c8411f0ded0b4e27981bad672c244f08118c46614"
+    },
+    {
+      "snapshot": "Honey_2_1",
+      "path": "index.html",
+      "bytes": 50979,
+      "sha256": "8e23d6db1da42f2fcf805529d03faa3005810f0c30aa4d2c249c172c1f2ed87a"
+    },
+    {
+      "snapshot": "Honey_2_1",
+      "path": "otbeditor.js",
+      "bytes": 92971,
+      "sha256": "17a6bce0e2e518d9540fd0ed576522f51f2647977ce17493557a34302cc9af5d"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "CMakeLists.txt",
+      "bytes": 25172,
+      "sha256": "de7cf8dee979b10ef56b4f4220ee7b8296d49944e5fd7f47831d7b3de40e4851"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "data/editor/README.md",
+      "bytes": 1156,
+      "sha256": "ca4beb8b5f253fd9225382185e1407f658d775c65bad8340a77434b7ae1945bd"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "data/PNGtoOTBMConverter-LICENSE.txt",
+      "bytes": 1148,
+      "sha256": "3e44b338f6d4a19b6e237982e3251160340255c6519c495898d8d359bba36f2a"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "LICENSE.rtf",
+      "bytes": 2643,
+      "sha256": "fb3a1e8407f1457ce20c167b939731b4e035c9911f23f27fc0cab4116b0f5036"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "README.md",
+      "bytes": 7348,
+      "sha256": "c0735489a76e422140fd429fadd56edfe3c533fa75dda37f0f8708c0f734b364"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/action.cpp",
+      "bytes": 24813,
+      "sha256": "18fdd0446d1324be3169ca2a50cc061340e7418c50069135b123d4c794c7436a"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/CMakeLists.txt",
+      "bytes": 21469,
+      "sha256": "b28ef963c1a15fbd418e8432d9a791097db9200f53e4db8849abfec42ba41836"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/editor_resource_session.cpp",
+      "bytes": 1934,
+      "sha256": "65c8cb119bcc2832e05b9c8e003ab72ef695cd7391ffb1bee8279fa57cc3c472"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/editor_resource_session.h",
+      "bytes": 2170,
+      "sha256": "5969bc7b6541f53d0ff990d14c00411a0bbfea425404e89339763b757aa46be6"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/file_transaction.h",
+      "bytes": 5774,
+      "sha256": "1244badba100a6172c2a3d37f7c3055acbfdef617ac1ae3d88c1654f2f072575"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/ingame_preview/playtest_controller.cpp",
+      "bytes": 6955,
+      "sha256": "d18e13f087c3563d6a6775185ec8cb8484c06c06537ef91286df46193bf19b17"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/protobuf/CMakeLists.txt",
+      "bytes": 347,
+      "sha256": "5f5085cd8b19c2a4bf67a0719af0150a633849ab1175b912dcca227b4ad8eff2"
+    },
+    {
+      "snapshot": "NexaMap-Editor-main",
+      "path": "source/quick_command_palette.cpp",
+      "bytes": 13656,
+      "sha256": "a43a289f72b8d2893997346ed3d6aa7493170f59a4122b0350da417a97cd340d"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "CMakeLists.txt",
+      "bytes": 1314,
+      "sha256": "debcde971b7294265fafc965da6631a334fdd8fdbe6b911612b1ddd0c3acd9a2"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "layouts/mobile/README.md",
+      "bytes": 66,
+      "sha256": "e2b82fdd916f9a7175140f6a0f2abfbcb747877d6131dfd52f2068343e5638d5"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "layouts/README.md",
+      "bytes": 350,
+      "sha256": "2544cedf00fe854309cc4f8c9b5a6d63420b4ca77853eed47f6a6ba1885a17f5"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "modules/client_mapexplorer/README.md",
+      "bytes": 3213,
+      "sha256": "d4b318e7f4107cb51d192da59313dd9ae155688c1536873354f8ddd5b6e4d646"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "modules/client_mapexplorer/services/map_loader_service.lua",
+      "bytes": 9952,
+      "sha256": "12961bcacf6cadeae901ba6491a257f7ca18bd174290bf2fbbd4bf35fe8b9456"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "modules/client_mapexplorer/services/persistence_service.lua",
+      "bytes": 3753,
+      "sha256": "5acf22219399589c5a2536e0b3118df8f33ed986fff59e858b15cd7b784f1a90"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "modules/client_mapexplorer/services/player_service.lua",
+      "bytes": 4527,
+      "sha256": "5f68a0a38320b8d78bb2e4cd151e3f0e336b1ef1547cc35f41a1c4ef9e7c09df"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "src/client/CMakeLists.txt",
+      "bytes": 3865,
+      "sha256": "dc19d03fb985d71d9c5232b4f7cd0596796ded81528fb03247ac5706cb7bf5d1"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "src/framework/CMakeLists.txt",
+      "bytes": 28889,
+      "sha256": "44b10da899da1ceaa10ba9b69ad8962772234bb69e6cd27edd0cb1b0c552dd72"
+    },
+    {
+      "snapshot": "otclientv8-offline-map-explorer-master",
+      "path": "tools/katepart-syntax/README",
+      "bytes": 331,
+      "sha256": "f4dcc3cef72598a4a81abb5b661eeffa7a6eb5f25e23ecbcd7e7d4d2673dfac9"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "CMakeLists.txt",
+      "bytes": 5255,
+      "sha256": "bd3f62d85d0f6576cc81e002b50c3c0d8442363905481e1d02c4c51f63065e5b"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "LICENSE.rtf",
+      "bytes": 2643,
+      "sha256": "fb3a1e8407f1457ce20c167b939731b4e035c9911f23f27fc0cab4116b0f5036"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "README.md",
+      "bytes": 1236,
+      "sha256": "59cba4fee5225b987ac0e1d40048078f31b2ad4b5f5829b8924c456edd30d249"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "source/action.cpp",
+      "bytes": 17533,
+      "sha256": "86163cf9a3155d444366c0c2e87608ec991dc487f4e89b5f7937a8f68a9c4409"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "source/CMakeLists.txt",
+      "bytes": 11271,
+      "sha256": "e9b270a38d9242345538d165df8932226e15af5cb6b4e08dc8d89dc289c9ebe8"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "source/live_action.cpp",
+      "bytes": 3174,
+      "sha256": "cdf5cb07b6e6166f34ad7fc4f151358409f2eac790dafdcd89468c66bd1224b7"
+    },
+    {
+      "snapshot": "remeres-map-editor-main",
+      "path": "source/protobuf/CMakeLists.txt",
+      "bytes": 1715,
+      "sha256": "64543dfb6d494537348e9e4ff1b56500447f253a3846a002693dfb5a42c49720"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "CMakeLists.txt",
+      "bytes": 5298,
+      "sha256": "6ea314f1bdbf56f3d94e6d448a888d3a0b01a0f219803d7a667ba1067e925f6d"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "data/convert_legacy_data_README.md",
+      "bytes": 8216,
+      "sha256": "b898fd858f74e8b955918d78de60465269a308e262a646b6b1d99e313de88712"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "ext/nanovg/LICENSE.txt",
+      "bytes": 859,
+      "sha256": "d1c46d70e4e62e6324ff845bc8f4831912e33a940a5e7949298250be74ef47aa"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "ext/nanovg/README.md",
+      "bytes": 5939,
+      "sha256": "c2182eb9bdfa293bd4aead3ee9514e032b3dfed63000b6cc756691e026179c0f"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "LICENSE.rtf",
+      "bytes": 2643,
+      "sha256": "fb3a1e8407f1457ce20c167b939731b4e035c9911f23f27fc0cab4116b0f5036"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "lua_tests/README_TESTS.md",
+      "bytes": 8691,
+      "sha256": "b8dbe4e987ec11c0246b78a15c11e329768ecd4a68ce4acc34fc9de1177773de"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "README.md",
+      "bytes": 5630,
+      "sha256": "1e75e181d1e5ccd0ac7491ad4ba5cc9684556fe06b82bc9aebd94e33cd1006b5"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "scripts/README.md",
+      "bytes": 35043,
+      "sha256": "f77fb26377047f9e9bcf4ca6669e1a1aa05a103a12216d5978f17a69eaeefd7e"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "source/CMakeLists.txt",
+      "bytes": 46034,
+      "sha256": "577c141d102ac82fcc16004940ee72ce42d38b9aaf2c06d6c7bb7fe7783b2b6b"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "source/editor/action.cpp",
+      "bytes": 14906,
+      "sha256": "e5c46df47f2376acc4130874ba0a81325423a974adb5fb5efb33bdb7481a1619"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "source/live/live_action.cpp",
+      "bytes": 3374,
+      "sha256": "6305c6cf5e1f497e6f1a1af4e06694d17c4d39d5646db494aad2eb46c4687457"
+    },
+    {
+      "snapshot": "remeres-map-editor-redux-master",
+      "path": "source/protobuf/CMakeLists.txt",
+      "bytes": 910,
+      "sha256": "f8d3ccf38d1169927c78455f7653e8b63661bf519b72aab8daa0467242a41478"
+    }
+  ]
+}
