@@ -71,6 +71,14 @@ EditorPage::EditorPage(QWidget* parent):QWidget(parent),history(this){
     history.setUndoLimit(150);auto* l=new QVBoxLayout(this);l->setContentsMargins(0,0,0,0);
     canvas=new Canvas(this);l->addWidget(canvas);
 }
+EditorPage::~EditorPage(){history.disconnect();}
+MainWindow::~MainWindow(){
+    // Child teardown can emit selection/history signals after derived members die.
+    for(auto* child:findChildren<QObject*>()) QObject::disconnect(child,nullptr,this,nullptr);
+    preview_.disconnect();
+    if(preview_.state()!=QProcess::NotRunning){preview_.kill();preview_.waitForFinished(2000);}
+    delete takeCentralWidget();
+}
 MainWindow::MainWindow(){
     setWindowTitle("NextGen Studio");resize(1440,900);setMinimumSize(960,640);
     setDockNestingEnabled(true);tabs_=new QTabWidget(this);tabs_->setDocumentMode(true);tabs_->setTabsClosable(true);

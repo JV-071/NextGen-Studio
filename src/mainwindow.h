@@ -10,6 +10,7 @@ namespace studio {
 class Canvas;
 struct EditorPage : QWidget {
     explicit EditorPage(QWidget* parent=nullptr);
+    ~EditorPage() override;
     Document document;
     QUndoStack history;
     Canvas* canvas;
@@ -20,6 +21,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow();
+    ~MainWindow() override;
     bool openFile(const QString& file);
     void openExample();
     bool smokeTest(QString& error);
