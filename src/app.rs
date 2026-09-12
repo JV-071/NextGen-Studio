@@ -1598,7 +1598,11 @@ impl eframe::App for Studio {
                         }
                     });
                     ui.menu_button("Ajuda", |ui| {
-                        ui.label("NextGen Studio 0.2 • Rust");
+                        ui.label(concat!(
+                            "NextGen Studio ",
+                            env!("CARGO_PKG_VERSION"),
+                            " • Rust"
+                        ));
                         ui.label("Editor desktop independente");
                     });
                 });

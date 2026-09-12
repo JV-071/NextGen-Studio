@@ -1,11 +1,12 @@
 """Package native Rust binary, integration and dependency notices. No SDK DLLs."""
-import argparse, hashlib, json, os, shutil, subprocess, zipfile
+import argparse, hashlib, json, os, shutil, subprocess, tomllib, zipfile
 from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument("--platform",required=True)
 p.add_argument("--config",choices=["Debug","Release"],required=True)
 a=p.parse_args()
 root=Path(__file__).resolve().parent.parent
+version=tomllib.loads((root/"Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
 stage=root/"staging"
 if stage.exists():
     raise SystemExit("Install tree already exists; use a clean staging directory")
@@ -38,9 +39,9 @@ for package in metadata["packages"]:
     entries.append({"name":package["name"],"version":package["version"],"license":package["license"],"repository":package["repository"],"authors":package["authors"],"notice_files":copied})
 (notices/"DEPENDENCIES.json").write_text(json.dumps(entries,indent=2)+"\n",encoding="utf-8")
 commit=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip()
-(stage/"BUILD.json").write_text(json.dumps({"version":"0.2.0","commit":commit,"platform":a.platform,"configuration":a.config,"rust":"1.98.1","renderer":"egui + glow/OpenGL","note":"Linux baseline Ubuntu 24.04. GTK3/OpenGL system libraries required. Windows uses static CRT."},indent=2)+"\n",encoding="utf-8")
+(stage/"BUILD.json").write_text(json.dumps({"version":version,"commit":commit,"platform":a.platform,"configuration":a.config,"rust":"1.98.1","renderer":"egui + glow/OpenGL","note":"Linux baseline Ubuntu 24.04. GTK3/OpenGL system libraries required. Windows uses static CRT."},indent=2)+"\n",encoding="utf-8")
 out=root/"dist";out.mkdir(exist_ok=True)
-name=f"NextGen-Studio-0.2.0-{a.platform}-{a.config}"
+name=f"NextGen-Studio-{version}-{a.platform}-{a.config}"
 archive=out/(name+".zip")
 with zipfile.ZipFile(archive,"w",zipfile.ZIP_DEFLATED,compresslevel=3) as z:
     for f in sorted(stage.rglob("*")):
