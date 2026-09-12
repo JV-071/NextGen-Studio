@@ -92,6 +92,7 @@ pub struct Studio {
 }
 impl Studio {
     pub fn new(cc: &eframe::CreationContext<'_>, log_path: PathBuf, smoke: bool) -> Self {
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         cc.egui_ctx.global_style_mut(|s| {
             s.spacing.item_spacing = Vec2::new(8.0, 6.0);
