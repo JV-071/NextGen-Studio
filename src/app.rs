@@ -607,19 +607,44 @@ impl Studio {
                     40.0 + (i % 5) as f32 * 40.0
                 },
             );
-            if d.value(i, "anchors.right") == "parent.right" {
+            let anchor = |key: &str| {
+                let value = d.value(i, key);
+                if value.is_empty() {
+                    resolved.get(key)
+                } else {
+                    value
+                }
+            };
+            let left = anchor("anchors.left") == "parent.left";
+            let right = anchor("anchors.right") == "parent.right";
+            let top = anchor("anchors.top") == "parent.top";
+            let bottom = anchor("anchors.bottom") == "parent.bottom";
+            if left && right {
+                x = num("margin-left", 0.0);
+                w = (parent.width() - x - num("margin-right", 0.0)).max(1.0);
+            } else if right {
                 x = parent.width() - w - num("margin-right", 0.0);
             }
-            if d.value(i, "anchors.bottom") == "parent.bottom" {
+            if top && bottom {
+                y = num("margin-top", 0.0);
+                h = (parent.height() - y - num("margin-bottom", 0.0)).max(1.0);
+            } else if bottom {
                 y = parent.height() - h - num("margin-bottom", 0.0);
             }
-            if d.value(i, "anchors.fill") == "parent" {
+            if anchor("anchors.horizontalCenter") == "parent.horizontalCenter" {
+                x = (parent.width() - w) / 2.0 + num("margin-left", 0.0) - num("margin-right", 0.0);
+            }
+            if anchor("anchors.verticalCenter") == "parent.verticalCenter" {
+                y = (parent.height() - h) / 2.0 + num("margin-top", 0.0)
+                    - num("margin-bottom", 0.0);
+            }
+            if anchor("anchors.fill") == "parent" {
                 x = 0.0;
                 y = 0.0;
                 w = parent.width();
                 h = parent.height();
             }
-            if d.value(i, "anchors.centerIn") == "parent" {
+            if anchor("anchors.centerIn") == "parent" {
                 x = (parent.width() - w) / 2.0;
                 y = (parent.height() - h) / 2.0;
             }
@@ -1391,11 +1416,22 @@ fn paint_otui_image(
         .split_whitespace()
         .filter_map(|part| part.parse().ok())
         .collect();
-    let source = if clip.len() == 4 {
+    let mut source = if clip.len() == 4 {
         Rect::from_min_size(Pos2::new(clip[0], clip[1]), Vec2::new(clip[2], clip[3]))
     } else {
         Rect::from_min_size(Pos2::ZERO, size)
     };
+    if style.get("image-fixed-ratio").eq_ignore_ascii_case("true") && target.is_positive() {
+        let source_aspect = source.width() / source.height();
+        let target_aspect = target.width() / target.height();
+        if source_aspect > target_aspect {
+            let width = source.height() * target_aspect;
+            source = Rect::from_center_size(source.center(), Vec2::new(width, source.height()));
+        } else {
+            let height = source.width() / target_aspect;
+            source = Rect::from_center_size(source.center(), Vec2::new(source.width(), height));
+        }
+    }
     let tint = parse_color(style.get("image-color"))
         .unwrap_or(Color32::WHITE)
         .gamma_multiply(opacity);
