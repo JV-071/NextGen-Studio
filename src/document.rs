@@ -388,6 +388,21 @@ impl Document {
         self.index();
         Ok(())
     }
+    pub fn remove_property(&mut self, n: usize, key: &str) -> Result<()> {
+        self.structural()?;
+        let node = self.nodes.get(n).ok_or("Seleção inválida.")?;
+        let matches: Vec<_> = node.properties.iter().filter(|p| p.key == key).collect();
+        if matches.len() != 1 {
+            return Err("Propriedade ausente ou duplicada.".into());
+        }
+        if matches[0].block {
+            return Err("Remova blocos compostos no código.".into());
+        }
+        let line = matches[0].line;
+        self.lines.remove(line);
+        self.index();
+        Ok(())
+    }
     pub fn remove(&mut self, n: usize) -> Result<()> {
         self.structural()?;
         let node = self.nodes.get(n).ok_or("Seleção inválida.")?;

@@ -55,7 +55,7 @@ pub struct Studio {
 impl Studio {
     pub fn new(cc: &eframe::CreationContext<'_>, log_path: PathBuf, smoke: bool) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
-        cc.egui_ctx.style_mut(|s| {
+        cc.egui_ctx.global_style_mut(|s| {
             s.spacing.item_spacing = Vec2::new(8.0, 7.0);
             s.spacing.button_padding = Vec2::new(10.0, 6.0);
             s.visuals.panel_fill = Color32::from_rgb(24, 34, 44);
@@ -500,7 +500,7 @@ impl Studio {
         if response.hovered() {
             let wheel = ui.input(|i| {
                 if i.modifiers.ctrl {
-                    i.raw_scroll_delta.y
+                    i.smooth_scroll_delta.y
                 } else {
                     0.0
                 }
@@ -646,7 +646,18 @@ impl Studio {
             .max_height(ui.available_height() * 0.6)
             .show(ui, |ui| {
                 for property in node.properties {
-                    ui.label(&property.key);
+                    ui.horizontal(|ui| {
+                        ui.label(&property.key);
+                        if ui
+                            .small_button("×")
+                            .on_hover_text("Remover propriedade")
+                            .clicked()
+                        {
+                            self.mutate("Remover propriedade", |d| {
+                                d.remove_property(n, &property.key)
+                            });
+                        }
+                    });
                     let id = egui::Id::new(("property", self.active, n, &property.key));
                     let mut value = ui
                         .memory(|m| m.data.get_temp::<String>(id))
@@ -693,6 +704,20 @@ impl Studio {
                 }
             }
         });
+        if ui.button("Limpar anchors").clicked() {
+            self.mutate("Limpar anchors", |d| {
+                let keys: Vec<String> = d.nodes[n]
+                    .properties
+                    .iter()
+                    .filter(|p| p.key.starts_with("anchors."))
+                    .map(|p| p.key.clone())
+                    .collect();
+                for k in keys {
+                    d.remove_property(n, &k)?;
+                }
+                Ok(())
+            });
+        }
         ui.label("Margens e tamanho: use margin-left/top/right/bottom e size.");
         if ui.button("Excluir elemento").clicked() {
             self.mutate("Excluir elemento", |d| d.remove(n));
@@ -739,7 +764,7 @@ impl eframe::App for Studio {
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
             self.save(false);
         }
-        if !ctx.wants_keyboard_input() {
+        if !ctx.egui_wants_keyboard_input() {
             if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
                 self.undo(false);
             }
@@ -747,7 +772,7 @@ impl eframe::App for Studio {
                 self.undo(true);
             }
         }
-        egui::TopBottomPanel::top("toolbar").show(root, |ui| {
+        egui::Panel::top("toolbar").show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("NEXTGEN  STUDIO")
@@ -786,7 +811,7 @@ impl eframe::App for Studio {
                 }
             });
         });
-        egui::TopBottomPanel::bottom("status").show(root, |ui| {
+        egui::Panel::bottom("status").show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.label(&self.status);
                 ui.separator();
@@ -797,9 +822,9 @@ impl eframe::App for Studio {
                 });
             });
         });
-        egui::TopBottomPanel::bottom("diagnostics")
+        egui::Panel::bottom("diagnostics")
             .resizable(true)
-            .default_height(130.0)
+            .default_size(130.0)
             .show(root, |ui| {
                 ui.horizontal(|ui| {
                     ui.strong("Diagnóstico");
@@ -833,9 +858,9 @@ impl eframe::App for Studio {
                         });
                 }
             });
-        egui::SidePanel::left("project")
+        egui::Panel::left("project")
             .resizable(true)
-            .default_width(240.0)
+            .default_size(240.0)
             .show(root, |ui| {
                 ui.heading("Projeto");
                 ui.horizontal(|ui| {
@@ -881,9 +906,9 @@ impl eframe::App for Studio {
                     });
                 }
             });
-        egui::SidePanel::right("inspector")
+        egui::Panel::right("inspector")
             .resizable(true)
-            .default_width(280.0)
+            .default_size(280.0)
             .show(root, |ui| {
                 self.properties(ui);
                 ui.separator();

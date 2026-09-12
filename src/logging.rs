@@ -8,6 +8,7 @@ use std::{
 };
 struct Logger {
     file: Mutex<File>,
+    path: PathBuf,
 }
 impl Log for Logger {
     fn enabled(&self, m: &Metadata) -> bool {
@@ -21,11 +22,36 @@ impl Log for Logger {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let line = format!("{now} [{}] {}: {}\n", r.level(), r.target(), r.args());
+        let mut line = format!("{now} [{}] {}: {}\n", r.level(), r.target(), r.args());
+        if line.len() > 65536 {
+            let mut end = 65536;
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            line.truncate(end);
+            line.push_str(" [truncated]\n");
+        }
         if cfg!(debug_assertions) {
             eprint!("{line}");
         }
         if let Ok(mut f) = self.file.lock() {
+            if f.metadata()
+                .is_ok_and(|m| m.len() + line.len() as u64 > 2 * 1024 * 1024)
+            {
+                let old = self.path.with_extension("log.1");
+                let _ = fs::remove_file(&old);
+                if fs::rename(&self.path, &old).is_ok() {
+                    if let Ok(next) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&self.path)
+                    {
+                        *f = next;
+                    }
+                } else {
+                    let _ = f.set_len(0);
+                }
+            }
             let _ = f.write_all(line.as_bytes());
             let _ = f.flush();
         }
@@ -63,6 +89,7 @@ pub fn init() -> std::io::Result<PathBuf> {
         if let Ok(f) = OpenOptions::new().create(true).append(true).open(&p) {
             let logger = Box::leak(Box::new(Logger {
                 file: Mutex::new(f),
+                path: p.clone(),
             }));
             let _ = log::set_logger(logger);
             log::set_max_level(LevelFilter::Info);
