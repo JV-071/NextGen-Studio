@@ -1,7 +1,7 @@
 # NextGen Studio
 
 Editor desktop nativo em **Rust 1.98.1**, edição 2024, com egui/eframe e OpenGL (glow).
-Windows e Linux x64. Versão **0.2.0 — prévia de desenvolvimento**.
+Windows e Linux x64. Versão **0.3.0 — prévia de desenvolvimento**.
 
 ## Baixar e executar
 
@@ -21,7 +21,7 @@ ou `bin/nextgen-studio` (Linux). Não extraia sobre a antiga distribuição Qt.
   conferir integridade; o programa não precisa dele e ele não vai em bin.
 
 ```powershell
-Get-FileHash .\NextGen-Studio-0.2.0-Windows-x64-Release.zip -Algorithm SHA256
+Get-FileHash .\NextGen-Studio-0.3.0-Windows-x64-Release.zip -Algorithm SHA256
 ```
 
 Compare o hash com a primeira coluna do arquivo .sha256.
@@ -33,30 +33,34 @@ Compare o hash com a primeira coluna do arquivo .sha256.
   validação opcional no motor.
 - Abas para OTUI, Lua, OTMOD, HTML e CSS; editor de código com aplicação explícita.
 - Hierarquia, propriedades escalares, inclusão/exclusão de widgets, undo/redo.
-- Canvas aproximado com zoom, grid, snapping configurável, pan pelo botão do meio,
+- Runtime offline com herança de estilos, variáveis, estados combinados, cores,
+  opacidade, recortes de atlas e imagens com bordas escaláveis.
+- Canvas com zoom, grid, snapping configurável, pan pelo botão do meio,
   movimento e resize de elementos sem geometria controlada por anchors/layout.
 - Botões de anchors ao pai; margens e tamanho editáveis no inspetor.
-- Prévia local de imagens e navegação de arquivos sob demanda.
-- Espaços de trabalho para Interface, Comportamentos, Recursos e Teste. O espaço
-  de Comportamentos já apresenta a estrutura do documento como grafo selecionável;
-  geração visual completa de Lua continua em desenvolvimento.
+- Biblioteca indexada de imagens, fontes, OTUI, Lua e OTMOD, com busca e carregamento
+  sob demanda. O catálogo aceita até 20.000 entradas e o cache visual até 128 texturas.
+- Espaços de trabalho para Interface, Comportamentos, Recursos e Teste. Comportamentos
+  cria handlers OTUI/Lua por ações visuais, com resultado imediato no documento.
+- Prévia integrada interativa: hover, pressed, disabled, checked, on e focus podem
+  ser inspecionados; cliques produzem histórico de simulação sem executar Lua.
 - Salvamento com arquivo temporário sincronizado, substituição, backup .bak e
   recusa de conflitos externos detectados.
 - Preserva bytes não atingidos nas edições pelo inspetor, BOM e UTF-8/Windows-1252.
 - Limites: 8 MiB por documento, oito abas, até 3.000 elementos desenhados,
   10.000 nós exibidos e histórico até 150 ações/32 MiB por documento.
 
-O parser visual cobre um subconjunto de OTML. Blocos compostos, estilos e scripts
-não são interpretados pelo canvas. O motor NextGen é a referência para fidelidade.
-O editor de código não oferece ainda LSP, depurador ou grafo visual de comportamento.
+Expressões dinâmicas `!property`, layouts customizados, shaders e widgets construídos
+em tempo de execução por Lua dependem do motor NextGen para fidelidade final. O editor
+de código não oferece ainda LSP ou depurador Lua.
 Painéis são redimensionáveis; docking livre do Qt não foi portado nesta versão.
 
 ## Prévia offline e validação opcional no NextGen
 
 A aba **Prévia offline** é o modo padrão, responde imediatamente às edições e não
-inicia outro programa. Ela cobre a geometria editável, seleção, zoom, grid,
-snapping, movimento e resize. O parser local ainda não reproduz todos os estilos,
-estados e scripts do motor.
+inicia outro programa. Use **Editar** para seleção, movimento e resize, ou **Interagir**
+para testar estados e cliques. O seletor de estado força hover, pressed, disabled,
+checked, on e focus para inspecionar cada aparência.
 
 A opção **Validar no NextGen** serve para a conferência final de fidelidade:
 

@@ -1,8 +1,11 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod app;
+mod assets;
+mod behavior;
 mod document;
 mod logging;
 mod preview;
+mod runtime;
 fn main() -> eframe::Result {
     let log_path = logging::init().unwrap_or_else(|e| {
         eprintln!("Log indisponível: {e}");

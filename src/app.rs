@@ -1,6 +1,9 @@
 use crate::{
+    assets::{AssetCatalog, AssetKind},
+    behavior::{self, ActionTemplate},
     document::{Document, History, Result},
     preview::Preview,
+    runtime::{ResolvedStyle, StyleBook, VisualState, is_style_definition, resolve_asset},
 };
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use std::{
@@ -53,6 +56,10 @@ pub struct Studio {
     project_filter: String,
     hierarchy_filter: String,
     files: HashMap<PathBuf, Vec<PathBuf>>,
+    styles: StyleBook,
+    assets: AssetCatalog,
+    asset_filter: String,
+    texture_cache: HashMap<PathBuf, egui::TextureHandle>,
     zoom: f32,
     pan: Vec2,
     grid: bool,
@@ -60,6 +67,8 @@ pub struct Studio {
     grid_size: f32,
     code: bool,
     show_native: bool,
+    interact: bool,
+    forced_state: String,
     live: bool,
     preview: Preview,
     texture: Option<egui::TextureHandle>,
@@ -71,6 +80,11 @@ pub struct Studio {
     new_id: String,
     drag: Option<(usize, Rect, bool)>,
     boxes: Vec<Rect>,
+    behavior_event: String,
+    behavior_action: ActionTemplate,
+    behavior_target: String,
+    behavior_argument: String,
+    simulation_log: Vec<String>,
     pending: Option<Instant>,
     smoke: bool,
     frames: u32,
@@ -117,6 +131,10 @@ impl Studio {
             project_filter: String::new(),
             hierarchy_filter: String::new(),
             files: HashMap::new(),
+            styles: StyleBook::default(),
+            assets: AssetCatalog::default(),
+            asset_filter: String::new(),
+            texture_cache: HashMap::new(),
             zoom: 1.0,
             pan: Vec2::ZERO,
             grid: true,
@@ -124,6 +142,8 @@ impl Studio {
             grid_size: 8.0,
             code: false,
             show_native: false,
+            interact: false,
+            forced_state: "Automático".into(),
             live: true,
             preview: Preview::default(),
             texture: None,
@@ -135,11 +155,20 @@ impl Studio {
             new_id: "novoElemento".into(),
             drag: None,
             boxes: vec![],
+            behavior_event: "@onClick".into(),
+            behavior_action: ActionTemplate::Show,
+            behavior_target: String::new(),
+            behavior_argument: String::new(),
+            simulation_log: Vec::new(),
             pending: None,
             smoke,
             frames: 0,
             closing: false,
         };
+        if s.settings.root.is_dir() {
+            let root = s.settings.root.clone();
+            s.load_project(root);
+        }
         s.new_document();
         if !smoke {
             if let Some(p) = std::env::args().skip(1).find(|a| !a.starts_with('-')) {
@@ -147,6 +176,19 @@ impl Studio {
             }
         }
         s
+    }
+    fn load_project(&mut self, path: PathBuf) {
+        self.settings.root = path;
+        self.files.clear();
+        self.texture_cache.clear();
+        self.styles = StyleBook::load(&self.settings.root);
+        self.assets = AssetCatalog::scan(&self.settings.root);
+        self.status = format!(
+            "Projeto indexado: {} estilos em {} arquivos • {} recursos",
+            self.styles.style_count(),
+            self.styles.files,
+            self.assets.entries.len()
+        );
     }
     fn report(&mut self, result: Result<()>) {
         if let Err(e) = result {
@@ -391,6 +433,28 @@ impl Studio {
             Err(e) => self.status = e,
         }
     }
+    fn cached_texture(&mut self, path: &Path) -> Option<egui::TextureHandle> {
+        if let Some(texture) = self.texture_cache.get(path) {
+            return Some(texture.clone());
+        }
+        let decoded = image::ImageReader::open(path).ok()?.decode().ok()?;
+        if u64::from(decoded.width()) * u64::from(decoded.height()) > 16_000_000 {
+            return None;
+        }
+        if self.texture_cache.len() >= 128 {
+            self.texture_cache.clear();
+        }
+        let rgba = decoded.to_rgba8();
+        let color = egui::ColorImage::from_rgba_unmultiplied(
+            [rgba.width() as usize, rgba.height() as usize],
+            rgba.as_raw(),
+        );
+        let texture =
+            self.context
+                .load_texture(path.to_string_lossy(), color, egui::TextureOptions::NEAREST);
+        self.texture_cache.insert(path.to_owned(), texture.clone());
+        Some(texture)
+    }
     fn tree(&mut self, ui: &mut egui::Ui, dir: &Path, depth: usize) {
         if depth > 12 {
             return;
@@ -488,12 +552,25 @@ impl Studio {
         let d = &page.doc;
         let mut boxes = vec![Rect::NOTHING; d.nodes.len().min(3000)];
         for (i, n) in d.nodes.iter().take(3000).enumerate() {
-            if !n.widget {
+            let under_definition = std::iter::successors(n.parent, |parent| {
+                d.nodes.get(*parent).and_then(|node| node.parent)
+            })
+            .any(|parent| {
+                d.nodes
+                    .get(parent)
+                    .is_some_and(|node| is_style_definition(&node.name))
+            });
+            if !n.widget || is_style_definition(&n.name) || under_definition {
                 continue;
             }
+            let resolved = self.styles.resolve(d, i, VisualState::default());
             let num = |key: &str, default: f32| {
-                d.value(i, key)
-                    .parse::<f32>()
+                let raw = if d.value(i, key).is_empty() {
+                    resolved.get(key)
+                } else {
+                    d.value(i, key)
+                };
+                raw.parse::<f32>()
                     .ok()
                     .filter(|n| n.is_finite())
                     .unwrap_or(default)
@@ -502,8 +579,12 @@ impl Studio {
             let root = n.parent.is_none();
             let mut w = num("width", if root { 620.0 } else { 140.0 });
             let mut h = num("height", if root { 400.0 } else { 36.0 });
-            let size: Vec<_> = d
-                .value(i, "size")
+            let size_value = if d.value(i, "size").is_empty() {
+                resolved.get("size")
+            } else {
+                d.value(i, "size")
+            };
+            let size: Vec<_> = size_value
                 .split_whitespace()
                 .filter_map(|n| n.parse::<f32>().ok())
                 .collect();
@@ -550,7 +631,33 @@ impl Studio {
     }
     fn canvas(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label("ESQUEMA OTUI");
+            ui.label(if self.interact {
+                "PRÉVIA INTERATIVA"
+            } else {
+                "EDIÇÃO VISUAL OTUI"
+            });
+            if ui.selectable_label(!self.interact, "Editar").clicked() {
+                self.interact = false;
+            }
+            if ui.selectable_label(self.interact, "Interagir").clicked() {
+                self.interact = true;
+            }
+            egui::ComboBox::from_id_salt("visual-state")
+                .selected_text(&self.forced_state)
+                .show_ui(ui, |ui| {
+                    for state in [
+                        "Automático",
+                        "Normal",
+                        "Hover",
+                        "Pressionado",
+                        "Desabilitado",
+                        "Marcado",
+                        "Ligado",
+                        "Foco",
+                    ] {
+                        ui.selectable_value(&mut self.forced_state, state.into(), state);
+                    }
+                });
             ui.checkbox(&mut self.grid, "Grid");
             ui.checkbox(&mut self.snap, "Snapping");
             ui.add(
@@ -564,7 +671,7 @@ impl Studio {
                 self.zoom = 1.0;
             }
         });
-        ui.label(egui::RichText::new("Estilos, imagens e Lua são renderizados na prévia nativa. Arraste com botão do meio para navegar.").small().color(Color32::GRAY));
+        ui.label(egui::RichText::new(format!("Runtime offline: {} estilos carregados • imagens, estados e eventos funcionam sem abrir o client.", self.styles.style_count())).small().color(Color32::GRAY));
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let area = response.rect;
@@ -606,6 +713,29 @@ impl Studio {
             if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
                 if let Some(n) = self.boxes.iter().rposition(|b| b.contains(local)) {
                     self.pages[self.active].selected = n;
+                    if self.interact && response.clicked() {
+                        let events = behavior::events(&self.pages[self.active].doc, n);
+                        let id = self.pages[self.active].doc.value(n, "id").to_owned();
+                        let handler = events
+                            .iter()
+                            .find(|(event, _)| event.eq_ignore_ascii_case("@onClick"));
+                        self.simulation_log
+                            .push(if let Some((_, expression)) = handler {
+                                format!(
+                                    "Clique em {} → {}",
+                                    if id.is_empty() { "widget" } else { &id },
+                                    expression
+                                )
+                            } else {
+                                format!(
+                                    "Clique em {} → nenhum @onClick",
+                                    if id.is_empty() { "widget" } else { &id }
+                                )
+                            });
+                        if self.simulation_log.len() > 100 {
+                            self.simulation_log.remove(0);
+                        }
+                    }
                     let r = self.boxes[n];
                     let resize = local.distance(r.max) < 12.0 / self.zoom;
                     let d = &self.pages[self.active].doc;
@@ -617,12 +747,13 @@ impl Studio {
                         || node.parent.is_some_and(|p| {
                             d.nodes[p].properties.iter().any(|p| p.key == "layout")
                         });
-                    if response.drag_started_by(egui::PointerButton::Primary)
+                    if !self.interact
+                        && response.drag_started_by(egui::PointerButton::Primary)
                         && !managed
                         && (resize || node.parent.is_some())
                     {
                         self.drag = Some((n, r, resize));
-                    } else if managed && response.drag_started() {
+                    } else if !self.interact && managed && response.drag_started() {
                         self.status="Geometria controlada por anchors/layout: edite as propriedades sem quebrar o vínculo.".into();
                     }
                 }
@@ -673,8 +804,48 @@ impl Studio {
                 self.drag = None;
             }
         }
-        let page = &self.pages[self.active];
-        for (i, b) in self.boxes.iter().enumerate() {
+        let pointer = response
+            .hover_pos()
+            .map(|position| Pos2::ZERO + (position - origin) / self.zoom);
+        let pressed = ui.input(|input| input.pointer.primary_down());
+        let render_items: Vec<_> = {
+            let page = &self.pages[self.active];
+            self.boxes
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| {
+                    if !b.is_finite() || !page.doc.nodes.get(i).is_some_and(|node| node.widget) {
+                        return None;
+                    }
+                    let automatic_hover =
+                        self.interact && pointer.is_some_and(|position| b.contains(position));
+                    let state = visual_state(
+                        &self.forced_state,
+                        automatic_hover,
+                        pressed && automatic_hover,
+                    );
+                    let style = self.styles.resolve(&page.doc, i, state);
+                    let label = if style.get("text").is_empty() {
+                        if page.doc.value(i, "text").is_empty() {
+                            page.doc.value(i, "id").to_owned()
+                        } else {
+                            page.doc.value(i, "text").to_owned()
+                        }
+                    } else {
+                        style.get("text").trim_matches(['\'', '"']).to_owned()
+                    };
+                    Some((
+                        i,
+                        *b,
+                        page.doc.nodes[i].name.clone(),
+                        label,
+                        style,
+                        i == page.selected,
+                    ))
+                })
+                .collect()
+        };
+        for (i, b, name, label, style, selected) in render_items {
             if !b.is_finite() {
                 continue;
             }
@@ -682,14 +853,28 @@ impl Studio {
             if !r.intersects(area) {
                 continue;
             }
-            let n = &page.doc.nodes[i];
-            let label = if page.doc.value(i, "text").is_empty() {
-                page.doc.value(i, "id")
-            } else {
-                page.doc.value(i, "text")
-            };
-            if !n.name.contains("Label") {
-                painter.rect_filled(r, 3.0, Color32::from_rgb(34, 49, 63));
+            let opacity = style
+                .get("opacity")
+                .parse::<f32>()
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
+            let background = parse_color(style.get("background-color"))
+                .unwrap_or_else(|| {
+                    if name.contains("Label") {
+                        Color32::TRANSPARENT
+                    } else {
+                        Color32::from_rgb(34, 49, 63)
+                    }
+                })
+                .gamma_multiply(opacity);
+            if background != Color32::TRANSPARENT {
+                painter.rect_filled(r, 3.0, background);
+            }
+            if let Some(path) = resolve_asset(&self.settings.root, style.get("image-source")) {
+                if let Some(texture) = self.cached_texture(&path) {
+                    paint_otui_image(&painter, &texture, r, &style, opacity);
+                }
+            } else if !name.contains("Label") {
                 painter.rect_stroke(
                     r,
                     3.0,
@@ -697,22 +882,17 @@ impl Studio {
                     StrokeKind::Inside,
                 );
             }
+            let offset = pair(style.get("text-offset")).unwrap_or(Vec2::ZERO) * self.zoom;
             painter.with_clip_rect(r.intersect(area)).text(
-                if n.parent.is_none() {
-                    r.min + Vec2::splat(8.0)
-                } else {
-                    r.center()
-                },
-                if n.parent.is_none() {
-                    Align2::LEFT_TOP
-                } else {
-                    Align2::CENTER_CENTER
-                },
+                r.center() + offset,
+                Align2::CENTER_CENTER,
                 label,
                 FontId::proportional(13.0 * self.zoom),
-                Color32::from_rgb(220, 231, 239),
+                parse_color(style.get("color"))
+                    .unwrap_or(Color32::from_rgb(220, 231, 239))
+                    .gamma_multiply(opacity),
             );
-            if i == page.selected {
+            if selected && !self.interact {
                 painter.rect_stroke(r, 0.0, Stroke::new(1.5, ACCENT), StrokeKind::Inside);
                 painter.rect_filled(Rect::from_center_size(r.max, Vec2::splat(7.0)), 0.0, ACCENT);
             }
@@ -723,11 +903,84 @@ impl Studio {
         ui.horizontal(|ui| {
             ui.strong("Fluxo visual do módulo");
             ui.separator();
-            ui.label("Estrutura sincronizada com o documento ativo");
+            ui.label("Eventos e ações gravados diretamente no OTUI");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(format!("{}%", (self.zoom * 100.0) as i32));
             });
         });
+        let selected = self.pages.get(self.active).map_or(0, |page| page.selected);
+        ui.horizontal_wrapped(|ui| {
+            egui::ComboBox::from_id_salt("behavior-event")
+                .selected_text(&self.behavior_event)
+                .show_ui(ui, |ui| {
+                    for event in [
+                        "@onClick",
+                        "@onDoubleClick",
+                        "@onHoverChange",
+                        "@onFocusChange",
+                        "@onTextChange",
+                        "@onEnter",
+                        "@onEscape",
+                    ] {
+                        ui.selectable_value(&mut self.behavior_event, event.into(), event);
+                    }
+                });
+            egui::ComboBox::from_id_salt("behavior-action")
+                .selected_text(self.behavior_action.label())
+                .show_ui(ui, |ui| {
+                    for action in ActionTemplate::ALL {
+                        ui.selectable_value(&mut self.behavior_action, action, action.label());
+                    }
+                });
+            ui.add(
+                egui::TextEdit::singleline(&mut self.behavior_target)
+                    .hint_text("ID do widget alvo"),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.behavior_argument).hint_text(
+                    if self.behavior_action == ActionTemplate::Custom {
+                        "expressão Lua"
+                    } else {
+                        "mensagem/opcional"
+                    },
+                ),
+            );
+            if ui.button("Adicionar ação").clicked() {
+                let key = self.behavior_event.clone();
+                let target = behavior::widget_reference(&self.behavior_target);
+                let expression = self
+                    .behavior_action
+                    .expression(&target, &self.behavior_argument);
+                if expression.is_empty() {
+                    self.status = "Informe uma expressão Lua válida.".into();
+                } else {
+                    self.mutate("Criar comportamento visual", |document| {
+                        document.set(selected, &key, &expression)
+                    });
+                }
+            }
+        });
+        if let Some(page) = self.pages.get(self.active) {
+            let current = behavior::events(&page.doc, selected);
+            if current.is_empty() {
+                ui.label(
+                    egui::RichText::new("O widget selecionado ainda não possui eventos.")
+                        .small()
+                        .color(Color32::GRAY),
+                );
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Eventos atuais:");
+                    for (event, expression) in current {
+                        ui.label(
+                            egui::RichText::new(format!("{event} → {expression}"))
+                                .small()
+                                .color(ACCENT),
+                        );
+                    }
+                });
+            }
+        }
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         painter.rect_filled(response.rect, 0.0, CANVAS);
@@ -858,7 +1111,15 @@ impl Studio {
         ui.separator();
         match self.bottom_panel {
             BottomPanel::Resources => {
-                ui.label("Imagens abertas pelo projeto aparecem aqui para inspeção.");
+                let counts = self.assets.counts();
+                ui.label(format!(
+                    "{} imagens • {} fontes • {} OTUI • {} Lua • {} OTMOD",
+                    counts[AssetKind::Image as usize],
+                    counts[AssetKind::Font as usize],
+                    counts[AssetKind::Interface as usize],
+                    counts[AssetKind::Script as usize],
+                    counts[AssetKind::Module as usize]
+                ));
                 if let Some(texture) = &self.asset {
                     ui.add(
                         egui::Image::new(texture)
@@ -894,6 +1155,70 @@ impl Studio {
                         page.doc.bytes().len() as f32 / 1024.0
                     ));
                 }
+            }
+        }
+    }
+
+    fn resource_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Biblioteca do projeto");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.asset_filter)
+                    .hint_text("Filtrar nome, pasta ou tipo…"),
+            );
+            if ui.button("Reindexar").clicked() {
+                let root = self.settings.root.clone();
+                self.assets = AssetCatalog::scan(&root);
+                self.texture_cache.clear();
+            }
+        });
+        let counts = self.assets.counts();
+        ui.label(format!("{} recursos indexados sob demanda • imagens {} • fontes {} • interfaces {} • scripts {} • módulos {}{}",
+            self.assets.entries.len(), counts[0], counts[1], counts[2], counts[3], counts[4], if self.assets.truncated { " • limite de segurança atingido" } else { "" }));
+        ui.separator();
+        let needle = self.asset_filter.to_ascii_lowercase();
+        let entries: Vec<_> = self
+            .assets
+            .entries
+            .iter()
+            .filter(|entry| {
+                needle.is_empty()
+                    || entry.relative.to_ascii_lowercase().contains(&needle)
+                    || entry.kind.label().to_ascii_lowercase().contains(&needle)
+            })
+            .take(2_000)
+            .cloned()
+            .collect();
+        let mut open = None;
+        egui::ScrollArea::vertical()
+            .id_salt("asset-catalog")
+            .show(ui, |ui| {
+                egui::Grid::new("asset-grid")
+                    .num_columns(3)
+                    .spacing(Vec2::new(18.0, 8.0))
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for entry in entries {
+                            if ui.selectable_label(false, entry.kind.label()).clicked() {
+                                open = Some(entry.path.clone());
+                            }
+                            if ui.selectable_label(false, &entry.relative).double_clicked() {
+                                open = Some(entry.path.clone());
+                            }
+                            ui.label(format_size(entry.bytes));
+                            ui.end_row();
+                        }
+                    });
+            });
+        if let Some(path) = open {
+            if path.extension().is_some_and(|extension| {
+                ["png", "jpg", "jpeg", "bmp"]
+                    .iter()
+                    .any(|value| extension.eq_ignore_ascii_case(value))
+            }) {
+                self.image(ui.ctx(), &path, false);
+            } else {
+                self.open(&path);
             }
         }
     }
@@ -991,6 +1316,168 @@ impl Studio {
         }
     }
 }
+
+fn visual_state(name: &str, hovered: bool, pressed: bool) -> VisualState {
+    let mut state = VisualState {
+        hovered,
+        pressed,
+        ..Default::default()
+    };
+    match name {
+        "Normal" => state = VisualState::default(),
+        "Hover" => state.hovered = true,
+        "Pressionado" => state.pressed = true,
+        "Desabilitado" => state.disabled = true,
+        "Marcado" => state.checked = true,
+        "Ligado" => state.on = true,
+        "Foco" => state.focused = true,
+        _ => {}
+    }
+    state
+}
+
+fn parse_color(value: &str) -> Option<Color32> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("transparent") || value.eq_ignore_ascii_case("alpha") {
+        return Some(Color32::TRANSPARENT);
+    }
+    let hex = value.strip_prefix('#')?;
+    let number = u32::from_str_radix(hex, 16).ok()?;
+    match hex.len() {
+        6 => Some(Color32::from_rgb(
+            (number >> 16) as u8,
+            (number >> 8) as u8,
+            number as u8,
+        )),
+        8 => Some(Color32::from_rgba_unmultiplied(
+            (number >> 24) as u8,
+            (number >> 16) as u8,
+            (number >> 8) as u8,
+            number as u8,
+        )),
+        _ => None,
+    }
+}
+
+fn pair(value: &str) -> Option<Vec2> {
+    let values: Vec<f32> = value
+        .split_whitespace()
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    (values.len() == 2).then(|| Vec2::new(values[0], values[1]))
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn paint_otui_image(
+    painter: &egui::Painter,
+    texture: &egui::TextureHandle,
+    target: Rect,
+    style: &ResolvedStyle,
+    opacity: f32,
+) {
+    let size = texture.size_vec2();
+    let clip: Vec<f32> = style
+        .get("image-clip")
+        .split_whitespace()
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    let source = if clip.len() == 4 {
+        Rect::from_min_size(Pos2::new(clip[0], clip[1]), Vec2::new(clip[2], clip[3]))
+    } else {
+        Rect::from_min_size(Pos2::ZERO, size)
+    };
+    let tint = parse_color(style.get("image-color"))
+        .unwrap_or(Color32::WHITE)
+        .gamma_multiply(opacity);
+    let border = style
+        .get("image-border")
+        .parse::<f32>()
+        .unwrap_or(0.0)
+        .max(0.0);
+    if border <= 0.0 || source.width() <= border * 2.0 || source.height() <= border * 2.0 {
+        painter.image(texture.id(), target, pixel_uv(source, size), tint);
+        return;
+    }
+    let left = style
+        .get("image-border-left")
+        .parse::<f32>()
+        .unwrap_or(border)
+        .min(source.width() / 2.0);
+    let right = style
+        .get("image-border-right")
+        .parse::<f32>()
+        .unwrap_or(border)
+        .min(source.width() / 2.0);
+    let top = style
+        .get("image-border-top")
+        .parse::<f32>()
+        .unwrap_or(border)
+        .min(source.height() / 2.0);
+    let bottom = style
+        .get("image-border-bottom")
+        .parse::<f32>()
+        .unwrap_or(border)
+        .min(source.height() / 2.0);
+    let dx = [
+        target.left(),
+        (target.left() + left).min(target.center().x),
+        (target.right() - right).max(target.center().x),
+        target.right(),
+    ];
+    let dy = [
+        target.top(),
+        (target.top() + top).min(target.center().y),
+        (target.bottom() - bottom).max(target.center().y),
+        target.bottom(),
+    ];
+    let sx = [
+        source.left(),
+        source.left() + left,
+        source.right() - right,
+        source.right(),
+    ];
+    let sy = [
+        source.top(),
+        source.top() + top,
+        source.bottom() - bottom,
+        source.bottom(),
+    ];
+    for row in 0..3 {
+        for column in 0..3 {
+            let destination = Rect::from_min_max(
+                Pos2::new(dx[column], dy[row]),
+                Pos2::new(dx[column + 1], dy[row + 1]),
+            );
+            let source_part = Rect::from_min_max(
+                Pos2::new(sx[column], sy[row]),
+                Pos2::new(sx[column + 1], sy[row + 1]),
+            );
+            if destination.is_positive() && source_part.is_positive() {
+                painter.image(texture.id(), destination, pixel_uv(source_part, size), tint);
+            }
+        }
+    }
+}
+
+fn pixel_uv(rect: Rect, texture_size: Vec2) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(rect.left() / texture_size.x, rect.top() / texture_size.y),
+        Pos2::new(
+            rect.right() / texture_size.x,
+            rect.bottom() / texture_size.y,
+        ),
+    )
+}
+
 impl eframe::App for Studio {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
@@ -1091,8 +1578,7 @@ impl eframe::App for Studio {
                     ui.menu_button("Projeto", |ui| {
                         if ui.button("Abrir pasta do projeto…").clicked() {
                             if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                self.settings.root = path;
-                                self.files.clear();
+                                self.load_project(path);
                             }
                             ui.close();
                         }
@@ -1172,8 +1658,7 @@ impl eframe::App for Studio {
                 ui.horizontal(|ui| {
                     if ui.button("Abrir projeto…").clicked() {
                         if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                            self.settings.root = p;
-                            self.files.clear();
+                            self.load_project(p);
                         }
                     }
                     if ui.small_button("↻").clicked() {
@@ -1228,12 +1713,16 @@ impl eframe::App for Studio {
             .show(root, |ui| {
                 if matches!(self.workspace, Workspace::Interface | Workspace::Behaviors) {
                     self.properties(ui);
-                } else {
-                    ui.heading(if self.workspace == Workspace::Resources {
-                        "Detalhes do recurso"
-                    } else {
-                        "Cenário de teste"
+                } else if self.workspace == Workspace::Test {
+                    ui.heading("Cenário de teste");
+                    ui.checkbox(&mut self.interact, "Interação ativada");
+                    ui.label("Passe o mouse e clique nos widgets. Os eventos são simulados localmente e nunca executam Lua arbitrário.");
+                    if ui.button("Limpar eventos").clicked() { self.simulation_log.clear(); }
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for event in self.simulation_log.iter().rev() { ui.label(event); }
                     });
+                } else {
+                    ui.heading("Detalhes do recurso");
                     ui.label("Selecione um item para editar suas opções.");
                 }
                 ui.separator();
@@ -1333,20 +1822,7 @@ impl eframe::App for Studio {
                 match self.workspace {
                     Workspace::Interface | Workspace::Test => self.canvas(ui),
                     Workspace::Behaviors => self.behavior_canvas(ui),
-                    Workspace::Resources => {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(80.0);
-                            ui.heading("Biblioteca de recursos");
-                            ui.label("Abra imagens na árvore do projeto para inspecioná-las aqui.");
-                            if let Some(texture) = &self.asset {
-                                ui.add(
-                                    egui::Image::new(texture)
-                                        .max_size(ui.available_size())
-                                        .maintain_aspect_ratio(true),
-                                );
-                            }
-                        });
-                    }
+                    Workspace::Resources => self.resource_workspace(ui),
                 }
             }
         });
