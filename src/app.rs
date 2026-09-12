@@ -845,7 +845,7 @@ impl Studio {
                 })
                 .collect()
         };
-        for (i, b, name, label, style, selected) in render_items {
+        for (_i, b, name, label, style, selected) in render_items {
             if !b.is_finite() {
                 continue;
             }

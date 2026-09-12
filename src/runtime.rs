@@ -76,10 +76,6 @@ impl StyleBook {
         book
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.styles.is_empty()
-    }
-
     pub fn style_count(&self) -> usize {
         self.styles.len()
     }
@@ -93,8 +89,10 @@ impl StyleBook {
             let indent = leading_spaces(raw);
             if indent == 0 && trimmed.starts_with('&') {
                 if let Some((name, value)) = trimmed.split_once(':') {
-                    self.variables
-                        .insert(name.trim().to_owned(), value.trim().to_owned());
+                    self.variables.insert(
+                        format!("${}", name.trim().trim_start_matches('&')),
+                        value.trim().to_owned(),
+                    );
                 }
                 index += 1;
                 continue;
