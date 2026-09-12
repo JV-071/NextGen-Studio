@@ -762,7 +762,7 @@ impl Studio {
                 let title = if page.doc.value(index, "id").is_empty() {
                     node.name.clone()
                 } else {
-                    page.doc.value(index, "id")
+                    page.doc.value(index, "id").to_owned()
                 };
                 (index, node.parent, rect, title, index == page.selected)
             })
