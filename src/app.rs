@@ -1039,54 +1039,88 @@ impl eframe::App for Studio {
                 self.undo(true);
             }
         }
-        egui::Panel::top("application_chrome").show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("◆  NextGen Studio").strong());
-                ui.separator();
-                ui.menu_button("Arquivo", |ui| {
-                    if ui.button("Novo").clicked() { self.new_document(); ui.close(); }
-                    if ui.button("Abrir…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Módulos", &["otui", "lua", "otmod", "html", "css"])
-                            .pick_file() { self.open(&path); }
-                        ui.close();
-                    }
-                    if ui.button("Salvar").clicked() { self.save(false); ui.close(); }
-                    if ui.button("Salvar como…").clicked() { self.save(true); ui.close(); }
-                });
-                ui.menu_button("Editar", |ui| {
-                    if ui.button("Desfazer   Ctrl+Z").clicked() { self.undo(false); ui.close(); }
-                    if ui.button("Refazer     Ctrl+Y").clicked() { self.undo(true); ui.close(); }
-                    if ui.button("Adicionar elemento").clicked() { self.add_dialog = true; ui.close(); }
-                });
-                ui.menu_button("Exibir", |ui| {
-                    ui.checkbox(&mut self.grid, "Grid");
-                    ui.checkbox(&mut self.snap, "Snapping");
-                    ui.checkbox(&mut self.live, "Atualização automática");
-                });
-                ui.menu_button("Projeto", |ui| {
-                    if ui.button("Abrir pasta do projeto…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                            self.settings.root = path;
-                            self.files.clear();
+        egui::Panel::top("application_chrome")
+            .exact_size(36.0)
+            .frame(egui::Frame::new().fill(PANEL).inner_margin(6.0))
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("◆  NextGen Studio").strong());
+                    ui.separator();
+                    ui.menu_button("Arquivo", |ui| {
+                        if ui.button("Novo").clicked() {
+                            self.new_document();
+                            ui.close();
                         }
-                        ui.close();
-                    }
-                    if ui.button("Atualizar arquivos").clicked() { self.files.clear(); ui.close(); }
-                });
-                ui.menu_button("Ferramentas", |ui| {
-                    if ui.button("Validar no motor NextGen   F5").clicked() {
-                        self.start_preview();
-                        ui.close();
-                    }
-                    if ui.button("Parar validação nativa").clicked() { self.preview.stop(); ui.close(); }
-                });
-                ui.menu_button("Ajuda", |ui| {
-                    ui.label("NextGen Studio 0.2 • Rust");
-                    ui.label("Editor desktop independente");
+                        if ui.button("Abrir…").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Módulos", &["otui", "lua", "otmod", "html", "css"])
+                                .pick_file()
+                            {
+                                self.open(&path);
+                            }
+                            ui.close();
+                        }
+                        if ui.button("Salvar").clicked() {
+                            self.save(false);
+                            ui.close();
+                        }
+                        if ui.button("Salvar como…").clicked() {
+                            self.save(true);
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("Editar", |ui| {
+                        if ui.button("Desfazer   Ctrl+Z").clicked() {
+                            self.undo(false);
+                            ui.close();
+                        }
+                        if ui.button("Refazer     Ctrl+Y").clicked() {
+                            self.undo(true);
+                            ui.close();
+                        }
+                        if ui.button("Adicionar elemento").clicked() {
+                            self.add_dialog = true;
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("Exibir", |ui| {
+                        ui.checkbox(&mut self.grid, "Grid");
+                        ui.checkbox(&mut self.snap, "Snapping");
+                        ui.checkbox(&mut self.live, "Atualização automática");
+                    });
+                    ui.menu_button("Projeto", |ui| {
+                        if ui.button("Abrir pasta do projeto…").clicked() {
+                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                self.settings.root = path;
+                                self.files.clear();
+                            }
+                            ui.close();
+                        }
+                        if ui.button("Atualizar arquivos").clicked() {
+                            self.files.clear();
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("Ferramentas", |ui| {
+                        if ui.button("Validar no motor NextGen   F5").clicked() {
+                            self.start_preview();
+                            ui.close();
+                        }
+                        if ui.button("Parar validação nativa").clicked() {
+                            self.preview.stop();
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("Ajuda", |ui| {
+                        ui.label("NextGen Studio 0.2 • Rust");
+                        ui.label("Editor desktop independente");
+                    });
                 });
             });
-            ui.separator();
+        egui::Panel::top("workspace_navigation")
+            .exact_size(46.0)
+            .frame(egui::Frame::new().fill(PANEL_RAISED).inner_margin(8.0))
+            .show(root, |ui| {
             ui.horizontal(|ui| {
                 for (workspace, icon, label) in [
                     (Workspace::Interface, "▦", "Interface"),
@@ -1107,21 +1141,26 @@ impl eframe::App for Studio {
                 });
             });
         });
-        egui::Panel::bottom("status").show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(&self.status);
-                ui.separator();
-                ui.label(if cfg!(debug_assertions) {
-                    "DEBUG • console ativo"
-                } else {
-                    "RELEASE"
+        egui::Panel::bottom("status")
+            .exact_size(30.0)
+            .frame(egui::Frame::new().fill(PANEL).inner_margin(6.0))
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(&self.status);
+                    ui.separator();
+                    ui.label(if cfg!(debug_assertions) {
+                        "DEBUG • console ativo"
+                    } else {
+                        "RELEASE"
+                    });
                 });
             });
-        });
         egui::Panel::bottom("workspace_bottom")
             .resizable(true)
-            .default_size(155.0)
-            .min_size(88.0)
+            .default_size(112.0)
+            .min_size(72.0)
+            .max_size(240.0)
+            .frame(egui::Frame::new().fill(PANEL).inner_margin(8.0))
             .show(root, |ui| {
                 self.bottom_content(ui);
             });
