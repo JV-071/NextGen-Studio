@@ -28,12 +28,18 @@ Compare o hash com a primeira coluna do arquivo .sha256.
 
 ## Edição
 
+- O editor, o canvas e a prévia offline funcionam sem instalar, abrir ou manter o
+  NextGen-OTC em execução. O client só é usado quando o usuário escolhe a
+  validação opcional no motor.
 - Abas para OTUI, Lua, OTMOD, HTML e CSS; editor de código com aplicação explícita.
 - Hierarquia, propriedades escalares, inclusão/exclusão de widgets, undo/redo.
 - Canvas aproximado com zoom, grid, snapping configurável, pan pelo botão do meio,
   movimento e resize de elementos sem geometria controlada por anchors/layout.
 - Botões de anchors ao pai; margens e tamanho editáveis no inspetor.
 - Prévia local de imagens e navegação de arquivos sob demanda.
+- Espaços de trabalho para Interface, Comportamentos, Recursos e Teste. O espaço
+  de Comportamentos já apresenta a estrutura do documento como grafo selecionável;
+  geração visual completa de Lua continua em desenvolvimento.
 - Salvamento com arquivo temporário sincronizado, substituição, backup .bak e
   recusa de conflitos externos detectados.
 - Preserva bytes não atingidos nas edições pelo inspetor, BOM e UTF-8/Windows-1252.
@@ -45,7 +51,14 @@ não são interpretados pelo canvas. O motor NextGen é a referência para fidel
 O editor de código não oferece ainda LSP, depurador ou grafo visual de comportamento.
 Painéis são redimensionáveis; docking livre do Qt não foi portado nesta versão.
 
-## Prévia nativa isolada e captura dentro do editor
+## Prévia offline e validação opcional no NextGen
+
+A aba **Prévia offline** é o modo padrão, responde imediatamente às edições e não
+inicia outro programa. Ela cobre a geometria editável, seleção, zoom, grid,
+snapping, movimento e resize. O parser local ainda não reproduz todos os estilos,
+estados e scripts do motor.
+
+A opção **Validar no NextGen** serve para a conferência final de fidelidade:
 
 1. Abra a raiz do NextGen em **Abrir projeto**.
 2. Abra um OTUI. Clique **Prévia nativa • F5**.
@@ -89,8 +102,8 @@ cargo build --locked --release
 
 `rust-toolchain.toml` fixa Rust 1.98.1, versão estável verificada em 11/09/2026.
 O lockfile fixa as dependências. A CI produz Debug/Release para Windows/Linux,
-com cache Cargo separado por plataforma/configuração, dois trabalhadores,
-testes de integridade e abertura do pacote instalado. Não publica artefatos
+com cache Cargo separado por plataforma/configuração, dois trabalhadores e
+testes de integridade do executável empacotado sem exigir GPU no runner. Não publica artefatos
 `evidence`; resultados continuam nos logs do job.
 
 Release usa opt-level=2, sem LTO, com 16 unidades de geração de código. É uma

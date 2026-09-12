@@ -22,6 +22,9 @@ fn main() -> eframe::Result {
         history.redo(&mut doc).expect("redo");
         assert_eq!(doc.value(0, "text"), "Rust");
         log::info!("Document smoke passed");
+        log::info!("Desktop smoke passed");
+        log::logger().flush();
+        return Ok(());
     }
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

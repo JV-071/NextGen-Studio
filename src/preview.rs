@@ -1,6 +1,7 @@
 use crate::document::{Result, atomic_write, read_bounded};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
@@ -61,18 +62,32 @@ impl Preview {
             .prefix("nextgen-studio-")
             .tempdir()
             .map_err(|e| e.to_string())?;
-        let output = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(session.path().join("client.log"))
-            .map_err(|e| e.to_string())?;
-        let child = Command::new(exe)
+        let mut child = Command::new(exe)
             .current_dir(root)
             .env("NEXTGEN_STUDIO_SESSION_DIR", session.path())
-            .stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?))
-            .stderr(Stdio::from(output))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| e.to_string())?;
+        fn pump(mut stream: impl Read + Send + 'static) {
+            std::thread::spawn(move || {
+                let mut bytes = [0u8; 4096];
+                loop {
+                    match stream.read(&mut bytes) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            log::info!(target:"nextgen", "{}",String::from_utf8_lossy(&bytes[..n]))
+                        }
+                    }
+                }
+            });
+        }
+        if let Some(out) = child.stdout.take() {
+            pump(out);
+        }
+        if let Some(err) = child.stderr.take() {
+            pump(err);
+        }
         self.child = Some(child);
         self.session = Some(session);
         self.status = "Cliente iniciado; aguardando integração…".into();
@@ -86,10 +101,11 @@ impl Preview {
         let session = self.session.as_ref().ok_or("Inicie a prévia nativa.")?;
         self.revision += 1;
         let req = serde_json::json!({"revision":self.revision,"text":text});
-        atomic_write(
-            &session.path().join("request.json"),
-            &serde_json::to_vec(&req).unwrap(),
-        )?;
+        let bytes = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
+        if bytes.len() > crate::document::MAX_BYTES {
+            return Err("A representação JSON da prévia excede 8 MiB.".into());
+        }
+        atomic_write(&session.path().join("request.json"), &bytes)?;
         self.status = format!("Revisão {} enviada; aguardando motor", self.revision);
         Ok(())
     }
@@ -120,8 +136,10 @@ impl Preview {
         if self.last_image == Some(changed) {
             return None;
         }
-        self.last_image = Some(changed);
         Some(p)
+    }
+    pub fn image_loaded(&mut self, p: &Path) {
+        self.last_image = fs::metadata(p).ok().and_then(|m| m.modified().ok());
     }
     pub fn stop(&mut self) {
         if let Some(mut c) = self.child.take() {

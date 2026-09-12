@@ -9,6 +9,25 @@ use std::{
     time::{Duration, Instant},
 };
 const ACCENT: Color32 = Color32::from_rgb(45, 206, 183);
+const PANEL: Color32 = Color32::from_rgb(22, 31, 40);
+const PANEL_RAISED: Color32 = Color32::from_rgb(28, 39, 50);
+const CANVAS: Color32 = Color32::from_rgb(13, 21, 28);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Workspace {
+    Interface,
+    Behaviors,
+    Resources,
+    Test,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BottomPanel {
+    Resources,
+    History,
+    Problems,
+    Output,
+}
 struct Page {
     doc: Document,
     history: History,
@@ -22,12 +41,17 @@ struct Settings {
     executable: PathBuf,
 }
 pub struct Studio {
+    context: egui::Context,
     pages: Vec<Page>,
     active: usize,
     settings: Settings,
     settings_path: PathBuf,
     log_path: PathBuf,
     status: String,
+    workspace: Workspace,
+    bottom_panel: BottomPanel,
+    project_filter: String,
+    hierarchy_filter: String,
     files: HashMap<PathBuf, Vec<PathBuf>>,
     zoom: f32,
     pan: Vec2,
@@ -56,11 +80,20 @@ impl Studio {
     pub fn new(cc: &eframe::CreationContext<'_>, log_path: PathBuf, smoke: bool) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         cc.egui_ctx.global_style_mut(|s| {
-            s.spacing.item_spacing = Vec2::new(8.0, 7.0);
-            s.spacing.button_padding = Vec2::new(10.0, 6.0);
-            s.visuals.panel_fill = Color32::from_rgb(24, 34, 44);
-            s.visuals.window_fill = Color32::from_rgb(28, 40, 51);
+            s.spacing.item_spacing = Vec2::new(8.0, 6.0);
+            s.spacing.button_padding = Vec2::new(12.0, 7.0);
+            s.spacing.interact_size.y = 28.0;
+            s.visuals.panel_fill = PANEL;
+            s.visuals.window_fill = PANEL_RAISED;
+            s.visuals.extreme_bg_color = CANVAS;
+            s.visuals.faint_bg_color = Color32::from_rgb(29, 41, 52);
+            s.visuals.widgets.inactive.bg_fill = Color32::from_rgb(29, 41, 52);
+            s.visuals.widgets.hovered.bg_fill = Color32::from_rgb(36, 55, 66);
+            s.visuals.widgets.active.bg_fill = Color32::from_rgb(31, 103, 109);
+            s.visuals.widgets.noninteractive.bg_stroke =
+                Stroke::new(1.0, Color32::from_rgb(48, 63, 76));
             s.visuals.selection.bg_fill = Color32::from_rgb(30, 91, 101);
+            s.visuals.selection.stroke = Stroke::new(1.5, ACCENT);
         });
         let settings_path = log_path.with_file_name("nextgen-studio.settings.json");
         let settings = if smoke {
@@ -72,12 +105,17 @@ impl Studio {
                 .unwrap_or_default()
         };
         let mut s = Self {
+            context: cc.egui_ctx.clone(),
             pages: vec![],
             active: 0,
             settings,
             settings_path,
             log_path,
             status: "Pronto • nenhum arquivo do cliente foi alterado".into(),
+            workspace: Workspace::Interface,
+            bottom_panel: BottomPanel::Resources,
+            project_filter: String::new(),
+            hierarchy_filter: String::new(),
             files: HashMap::new(),
             zoom: 1.0,
             pan: Vec2::ZERO,
@@ -169,6 +207,10 @@ impl Studio {
     }
     fn mutate(&mut self, label: &str, op: impl FnOnce(&mut Document) -> Result<()>) {
         if let Some(p) = self.pages.get_mut(self.active) {
+            if p.draft && label != "Editar código" {
+                self.status = "Aplique o código pendente antes de editar o design.".into();
+                return;
+            }
             let result = p.history.apply(&mut p.doc, label, op);
             if result.is_ok() {
                 p.source = p.doc.text();
@@ -178,6 +220,13 @@ impl Studio {
         }
     }
     fn undo(&mut self, redo: bool) {
+        if !self.commit_fields() {
+            return;
+        }
+        if self.pages.get(self.active).is_some_and(|p| p.draft) {
+            self.status = "Aplique o código pendente antes de usar o histórico.".into();
+            return;
+        }
         if let Some(p) = self.pages.get_mut(self.active) {
             let r = if redo {
                 p.history.redo(&mut p.doc)
@@ -188,7 +237,41 @@ impl Studio {
             self.report(r);
         }
     }
+    fn commit_fields(&mut self) -> bool {
+        let mut edits = Vec::new();
+        if let Some(p) = self.pages.get(self.active) {
+            for (n, node) in p.doc.nodes.iter().enumerate() {
+                for prop in &node.properties {
+                    let id = egui::Id::new(("property", self.active, n, &prop.key));
+                    if let Some(value) = self.context.memory(|m| m.data.get_temp::<String>(id)) {
+                        if value != prop.value {
+                            edits.push((id, n, prop.key.clone(), value));
+                        } else {
+                            self.context.memory_mut(|m| m.data.remove::<String>(id));
+                        }
+                    }
+                }
+            }
+        }
+        for (id, n, key, value) in edits {
+            let p = &mut self.pages[self.active];
+            let result = p.history.apply(&mut p.doc, "Alterar propriedade", |d| {
+                d.set(n, &key, &value)
+            });
+            if let Err(e) = result {
+                self.report(Err(e));
+                return false;
+            }
+            p.source = p.doc.text();
+            self.context.memory_mut(|m| m.data.remove::<String>(id));
+            self.pending = Some(Instant::now());
+        }
+        true
+    }
     fn save(&mut self, save_as: bool) -> bool {
+        if !self.commit_fields() {
+            return false;
+        }
         if self.pages.get(self.active).is_some_and(|p| p.draft) {
             let text = self.pages[self.active].source.clone();
             self.mutate("Editar código", |d| d.replace_text(&text));
@@ -239,6 +322,9 @@ impl Studio {
         ok
     }
     fn confirm_page(&mut self) -> bool {
+        if !self.commit_fields() {
+            return false;
+        }
         if !self
             .pages
             .get(self.active)
@@ -296,6 +382,7 @@ impl Studio {
         match result {
             Ok(t) => {
                 if native {
+                    self.preview.image_loaded(p);
                     self.texture = Some(t)
                 } else {
                     self.asset = Some(t)
@@ -386,6 +473,7 @@ impl Studio {
     fn send_preview(&mut self) {
         if let Some(p) = self.pages.get(self.active) {
             if p.doc.is_otui {
+                self.texture = None;
                 let r = self.preview.send(&p.doc.text());
                 if let Err(e) = r {
                     self.status = e;
@@ -630,6 +718,185 @@ impl Studio {
             }
         }
     }
+
+    fn behavior_canvas(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.strong("Fluxo visual do módulo");
+            ui.separator();
+            ui.label("Estrutura sincronizada com o documento ativo");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{}%", (self.zoom * 100.0) as i32));
+            });
+        });
+        let (response, painter) =
+            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        painter.rect_filled(response.rect, 0.0, CANVAS);
+        let step = 18.0;
+        let mut x = response.rect.left();
+        while x < response.rect.right() {
+            let mut y = response.rect.top();
+            while y < response.rect.bottom() {
+                painter.circle_filled(Pos2::new(x, y), 0.7, Color32::from_rgb(43, 58, 70));
+                y += step;
+            }
+            x += step;
+        }
+        let Some(page) = self.pages.get(self.active) else {
+            return;
+        };
+        let nodes: Vec<_> = page
+            .doc
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.widget)
+            .take(24)
+            .map(|(index, node)| {
+                let depth = node.indent.min(5) as f32;
+                let column = depth;
+                let row = index as f32;
+                let rect = Rect::from_min_size(
+                    response.rect.min + Vec2::new(32.0 + column * 190.0, 34.0 + (row % 7.0) * 82.0),
+                    Vec2::new(156.0, 58.0),
+                );
+                let title = if page.doc.value(index, "id").is_empty() {
+                    node.name.clone()
+                } else {
+                    page.doc.value(index, "id")
+                };
+                (index, node.parent, rect, title, index == page.selected)
+            })
+            .collect();
+        let rect_by_index: HashMap<usize, Rect> = nodes
+            .iter()
+            .map(|(index, _, rect, _, _)| (*index, *rect))
+            .collect();
+        for (_, parent, rect, _, _) in &nodes {
+            if let Some(parent_rect) = parent.and_then(|p| rect_by_index.get(&p)) {
+                painter.line_segment(
+                    [parent_rect.right_center(), rect.left_center()],
+                    Stroke::new(1.5, ACCENT.gamma_multiply(0.75)),
+                );
+            }
+        }
+        let mut selected = None;
+        for (index, _, rect, title, active) in nodes {
+            let visible = rect.intersect(response.rect);
+            if visible.is_negative() {
+                continue;
+            }
+            let node_response =
+                ui.interact(rect, egui::Id::new(("flow", index)), egui::Sense::click());
+            if node_response.clicked() {
+                selected = Some(index);
+            }
+            painter.rect_filled(
+                rect,
+                6.0,
+                if active {
+                    Color32::from_rgb(27, 84, 88)
+                } else {
+                    PANEL_RAISED
+                },
+            );
+            painter.rect_stroke(
+                rect,
+                6.0,
+                Stroke::new(
+                    1.0,
+                    if active {
+                        ACCENT
+                    } else {
+                        Color32::from_rgb(63, 82, 96)
+                    },
+                ),
+                StrokeKind::Inside,
+            );
+            painter.text(
+                rect.left_top() + Vec2::new(12.0, 10.0),
+                Align2::LEFT_TOP,
+                title,
+                FontId::proportional(14.0),
+                Color32::from_rgb(226, 235, 241),
+            );
+            painter.text(
+                rect.left_bottom() + Vec2::new(12.0, -10.0),
+                Align2::LEFT_BOTTOM,
+                "Widget OTUI",
+                FontId::proportional(11.0),
+                Color32::from_rgb(143, 161, 174),
+            );
+        }
+        if let Some(index) = selected {
+            if let Some(page) = self.pages.get_mut(self.active) {
+                page.selected = index;
+            }
+        }
+    }
+
+    fn bottom_content(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            for (tab, label) in [
+                (BottomPanel::Resources, "Recursos"),
+                (BottomPanel::History, "Histórico"),
+                (BottomPanel::Problems, "Problemas"),
+                (BottomPanel::Output, "Saída"),
+            ] {
+                if ui
+                    .selectable_label(self.bottom_panel == tab, label)
+                    .clicked()
+                {
+                    self.bottom_panel = tab;
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Local do log").clicked() {
+                    self.status = self.log_path.display().to_string();
+                }
+            });
+        });
+        ui.separator();
+        match self.bottom_panel {
+            BottomPanel::Resources => {
+                ui.label("Imagens abertas pelo projeto aparecem aqui para inspeção.");
+                if let Some(texture) = &self.asset {
+                    ui.add(
+                        egui::Image::new(texture)
+                            .fit_to_exact_size(Vec2::new(180.0, 90.0))
+                            .maintain_aspect_ratio(true),
+                    );
+                }
+            }
+            BottomPanel::History => {
+                if let Some(page) = self.pages.get(self.active) {
+                    for label in page.history.labels() {
+                        ui.label(label);
+                    }
+                }
+            }
+            BottomPanel::Problems => {
+                if let Some(page) = self.pages.get(self.active) {
+                    if page.doc.issues.is_empty() {
+                        ui.colored_label(ACCENT, "Nenhum problema detectado no documento.");
+                    }
+                    for issue in &page.doc.issues {
+                        ui.colored_label(Color32::from_rgb(237, 177, 72), issue);
+                    }
+                }
+            }
+            BottomPanel::Output => {
+                ui.label(&self.preview.status);
+                if let Some(page) = self.pages.get(self.active) {
+                    ui.label(format!(
+                        "{} • {} nós • {:.1} KiB",
+                        page.doc.encoding(),
+                        page.doc.nodes.len(),
+                        page.doc.bytes().len() as f32 / 1024.0
+                    ));
+                }
+            }
+        }
+    }
     fn properties(&mut self, ui: &mut egui::Ui) {
         ui.heading("Propriedades");
         let Some(page) = self.pages.get(self.active) else {
@@ -772,43 +1039,72 @@ impl eframe::App for Studio {
                 self.undo(true);
             }
         }
-        egui::Panel::top("toolbar").show(root, |ui| {
+        egui::Panel::top("application_chrome").show(root, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("NEXTGEN  STUDIO")
-                        .strong()
-                        .color(ACCENT),
-                );
-                ui.label("RUST • 0.2");
-                if ui.button("Novo").clicked() {
-                    self.new_document();
-                }
-                if ui.button("Abrir…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Módulos", &["otui", "lua", "otmod", "html", "css"])
-                        .pick_file()
-                    {
-                        self.open(&p);
+                ui.label(egui::RichText::new("◆  NextGen Studio").strong());
+                ui.separator();
+                ui.menu_button("Arquivo", |ui| {
+                    if ui.button("Novo").clicked() { self.new_document(); ui.close(); }
+                    if ui.button("Abrir…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Módulos", &["otui", "lua", "otmod", "html", "css"])
+                            .pick_file() { self.open(&path); }
+                        ui.close();
                     }
+                    if ui.button("Salvar").clicked() { self.save(false); ui.close(); }
+                    if ui.button("Salvar como…").clicked() { self.save(true); ui.close(); }
+                });
+                ui.menu_button("Editar", |ui| {
+                    if ui.button("Desfazer   Ctrl+Z").clicked() { self.undo(false); ui.close(); }
+                    if ui.button("Refazer     Ctrl+Y").clicked() { self.undo(true); ui.close(); }
+                    if ui.button("Adicionar elemento").clicked() { self.add_dialog = true; ui.close(); }
+                });
+                ui.menu_button("Exibir", |ui| {
+                    ui.checkbox(&mut self.grid, "Grid");
+                    ui.checkbox(&mut self.snap, "Snapping");
+                    ui.checkbox(&mut self.live, "Atualização automática");
+                });
+                ui.menu_button("Projeto", |ui| {
+                    if ui.button("Abrir pasta do projeto…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.settings.root = path;
+                            self.files.clear();
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Atualizar arquivos").clicked() { self.files.clear(); ui.close(); }
+                });
+                ui.menu_button("Ferramentas", |ui| {
+                    if ui.button("Validar no motor NextGen   F5").clicked() {
+                        self.start_preview();
+                        ui.close();
+                    }
+                    if ui.button("Parar validação nativa").clicked() { self.preview.stop(); ui.close(); }
+                });
+                ui.menu_button("Ajuda", |ui| {
+                    ui.label("NextGen Studio 0.2 • Rust");
+                    ui.label("Editor desktop independente");
+                });
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                for (workspace, icon, label) in [
+                    (Workspace::Interface, "▦", "Interface"),
+                    (Workspace::Behaviors, "⌘", "Comportamentos"),
+                    (Workspace::Resources, "▦", "Recursos"),
+                    (Workspace::Test, "▶", "Teste"),
+                ] {
+                    let active = self.workspace == workspace;
+                    if ui
+                        .selectable_label(active, egui::RichText::new(format!("{icon}  {label}")).size(14.0))
+                        .clicked() { self.workspace = workspace; }
                 }
-                if ui.button("Salvar").clicked() {
-                    self.save(false);
-                }
-                if ui.button("Salvar como…").clicked() {
-                    self.save(true);
-                }
-                if ui.button("Desfazer").clicked() {
-                    self.undo(false);
-                }
-                if ui.button("Refazer").clicked() {
-                    self.undo(true);
-                }
-                if ui.button("+ Elemento").clicked() {
-                    self.add_dialog = true;
-                }
-                if ui.button("Prévia nativa • F5").clicked() {
-                    self.start_preview();
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new("▶  Validar no NextGen").fill(Color32::from_rgb(18, 105, 116))).on_hover_text("Opcional: abre um processo separado do client para conferir fidelidade").clicked() {
+                        self.start_preview();
+                    }
+                    if ui.button("Salvar").clicked() { self.save(false); }
+                });
             });
         });
         egui::Panel::bottom("status").show(root, |ui| {
@@ -822,47 +1118,18 @@ impl eframe::App for Studio {
                 });
             });
         });
-        egui::Panel::bottom("diagnostics")
+        egui::Panel::bottom("workspace_bottom")
             .resizable(true)
-            .default_size(130.0)
+            .default_size(155.0)
+            .min_size(88.0)
             .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.strong("Diagnóstico");
-                    ui.label(&self.preview.status);
-                    ui.checkbox(&mut self.live, "Atualizar motor após edições");
-                    if ui.button("Parar prévia").clicked() {
-                        self.preview.stop();
-                    }
-                    if ui.button("Local do log").clicked() {
-                        self.status = self.log_path.display().to_string();
-                    }
-                });
-                if let Some(p) = self.pages.get(self.active) {
-                    egui::ScrollArea::vertical()
-                        .id_salt("issues")
-                        .show(ui, |ui| {
-                            for issue in &p.doc.issues {
-                                ui.colored_label(Color32::YELLOW, issue);
-                            }
-                            ui.label(format!(
-                                "{} • {} nós • {:.1} KiB",
-                                p.doc.encoding(),
-                                p.doc.nodes.len(),
-                                p.doc.bytes().len() as f32 / 1024.0
-                            ));
-                            ui.collapsing("Histórico", |ui| {
-                                for label in p.history.labels() {
-                                    ui.label(label);
-                                }
-                            });
-                        });
-                }
+                self.bottom_content(ui);
             });
         egui::Panel::left("project")
             .resizable(true)
             .default_size(240.0)
             .show(root, |ui| {
-                ui.heading("Projeto");
+                ui.strong("Projeto");
                 ui.horizontal(|ui| {
                     if ui.button("Abrir projeto…").clicked() {
                         if let Some(p) = rfd::FileDialog::new().pick_folder() {
@@ -874,6 +1141,10 @@ impl eframe::App for Studio {
                         self.files.clear();
                     }
                 });
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.project_filter)
+                        .hint_text("Buscar no projeto…"),
+                );
                 let project = self.settings.root.clone();
                 egui::ScrollArea::vertical()
                     .id_salt("files")
@@ -882,23 +1153,29 @@ impl eframe::App for Studio {
                         if project.is_dir() {
                             self.tree(ui, &project, 0);
                         } else {
-                            ui.label("Selecione a pasta do NextGen.");
+                            ui.label("Selecione qualquer pasta de projeto.");
                         }
                     });
                 ui.separator();
-                ui.heading("Hierarquia");
+                ui.strong("Hierarquia");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.hierarchy_filter)
+                        .hint_text("Buscar na hierarquia…"),
+                );
                 if let Some(p) = self.pages.get_mut(self.active) {
                     egui::ScrollArea::vertical().id_salt("tree").show(ui, |ui| {
                         for (i, n) in p.doc.nodes.iter().take(10000).enumerate() {
+                            let caption = format!("{}  {}", n.name, p.doc.value(i, "id"));
+                            if !self.hierarchy_filter.is_empty()
+                                && !caption
+                                    .to_lowercase()
+                                    .contains(&self.hierarchy_filter.to_lowercase())
+                            {
+                                continue;
+                            }
                             ui.horizontal(|ui| {
                                 ui.add_space((n.indent.min(24) * 5) as f32);
-                                if ui
-                                    .selectable_label(
-                                        p.selected == i,
-                                        format!("{}  {}", n.name, p.doc.value(i, "id")),
-                                    )
-                                    .clicked()
-                                {
+                                if ui.selectable_label(p.selected == i, caption).clicked() {
                                     p.selected = i;
                                 }
                             });
@@ -910,7 +1187,16 @@ impl eframe::App for Studio {
             .resizable(true)
             .default_size(280.0)
             .show(root, |ui| {
-                self.properties(ui);
+                if matches!(self.workspace, Workspace::Interface | Workspace::Behaviors) {
+                    self.properties(ui);
+                } else {
+                    ui.heading(if self.workspace == Workspace::Resources {
+                        "Detalhes do recurso"
+                    } else {
+                        "Cenário de teste"
+                    });
+                    ui.label("Selecione um item para editar suas opções.");
+                }
                 ui.separator();
                 if let Some(t) = &self.asset {
                     ui.add(
@@ -920,29 +1206,110 @@ impl eframe::App for Studio {
                     );
                 }
             });
-        egui::CentralPanel::default().show(root,|ui|{
-            ui.horizontal_wrapped(|ui|{
-                for (i,p) in self.pages.iter().enumerate(){let name=p.doc.path.as_ref().and_then(|p|p.file_name()).map(|s|s.to_string_lossy().into_owned()).unwrap_or("Novo documento".into());
-                    if ui.selectable_label(self.active==i,format!("{name}{}",if p.doc.dirty()||p.draft{" *"}else{""})).clicked(){self.active=i;}}
-                if ui.small_button("Fechar aba").clicked(){self.close_page();}
-            });
-            ui.separator();ui.horizontal(|ui|{
-                if ui.selectable_label(!self.code&&!self.show_native,"Design").clicked(){self.code=false;self.show_native=false;}
-                if ui.selectable_label(self.code,"Código").clicked(){self.code=true;self.show_native=false;}
-                if ui.selectable_label(self.show_native,"Captura nativa").clicked(){self.show_native=true;self.code=false;}
-            });
-            if self.show_native{
-                ui.label("Imagem renderizada pelo processo NextGen • interação na janela separada do cliente.");
-                ui.label("Não é vídeo contínuo: a captura é renovada após cada revisão.");
-                if let Some(t)=&self.texture{ui.add(egui::Image::new(t).max_size(ui.available_size()).maintain_aspect_ratio(true));}else{ui.label("Inicie a prévia nativa com F5 para receber a captura.");}
-            }else if self.code||self.pages.get(self.active).is_some_and(|p|!p.doc.is_otui){
-                if let Some(p)=self.pages.get_mut(self.active){
-                    ui.label("Código OTUI / Lua / OTMOD • aplicar registra uma única ação no histórico.");
-                    let apply=ui.button("Aplicar código").clicked();
-                    egui::ScrollArea::both().id_salt("source").show(ui,|ui|{if ui.add(egui::TextEdit::multiline(&mut p.source).code_editor().desired_width(f32::INFINITY).desired_rows(32)).changed(){p.draft=true;}});
-                    if apply{let text=p.source.clone();self.mutate("Editar código",|d|d.replace_text(&text));}
+        egui::CentralPanel::default().show(root, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (i, p) in self.pages.iter().enumerate() {
+                    let name = p
+                        .doc
+                        .path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or("Novo documento".into());
+                    if ui
+                        .selectable_label(
+                            self.active == i,
+                            format!("{name}{}", if p.doc.dirty() || p.draft { " *" } else { "" }),
+                        )
+                        .clicked()
+                    {
+                        self.active = i;
+                    }
                 }
-            }else{self.canvas(ui);}
+                if ui.small_button("Fechar aba").clicked() {
+                    self.close_page();
+                }
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(!self.code && !self.show_native, "Prévia offline")
+                    .on_hover_text("Funciona sem abrir ou instalar o NextGen")
+                    .clicked()
+                {
+                    self.code = false;
+                    self.show_native = false;
+                }
+                if ui.selectable_label(self.code, "Código").clicked() {
+                    self.code = true;
+                    self.show_native = false;
+                }
+                if ui
+                    .selectable_label(self.show_native, "Validação no motor")
+                    .clicked()
+                {
+                    self.show_native = true;
+                    self.code = false;
+                }
+                ui.separator();
+                ui.label("Desktop  1280 × 720");
+            });
+            if self.show_native {
+                ui.label("Validação opcional renderizada por um processo NextGen separado.");
+                ui.label("Não é vídeo contínuo: a captura é renovada após cada revisão.");
+                if let Some(t) = &self.texture {
+                    ui.add(
+                        egui::Image::new(t)
+                            .max_size(ui.available_size())
+                            .maintain_aspect_ratio(true),
+                    );
+                } else {
+                    ui.label("Inicie a prévia nativa com F5 para receber a captura.");
+                }
+            } else if self.code || self.pages.get(self.active).is_some_and(|p| !p.doc.is_otui) {
+                if let Some(p) = self.pages.get_mut(self.active) {
+                    ui.label(
+                        "Código OTUI / Lua / OTMOD • aplicar registra uma única ação no histórico.",
+                    );
+                    let apply = ui.button("Aplicar código").clicked();
+                    egui::ScrollArea::both().id_salt("source").show(ui, |ui| {
+                        if ui
+                            .add(
+                                egui::TextEdit::multiline(&mut p.source)
+                                    .code_editor()
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(32),
+                            )
+                            .changed()
+                        {
+                            p.draft = true;
+                        }
+                    });
+                    if apply {
+                        let text = p.source.clone();
+                        self.mutate("Editar código", |d| d.replace_text(&text));
+                    }
+                }
+            } else {
+                match self.workspace {
+                    Workspace::Interface | Workspace::Test => self.canvas(ui),
+                    Workspace::Behaviors => self.behavior_canvas(ui),
+                    Workspace::Resources => {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(80.0);
+                            ui.heading("Biblioteca de recursos");
+                            ui.label("Abra imagens na árvore do projeto para inspecioná-las aqui.");
+                            if let Some(texture) = &self.asset {
+                                ui.add(
+                                    egui::Image::new(texture)
+                                        .max_size(ui.available_size())
+                                        .maintain_aspect_ratio(true),
+                                );
+                            }
+                        });
+                    }
+                }
+            }
         });
         if self.add_dialog {
             let mut open = true;
