@@ -1,0 +1,959 @@
+use crate::{
+    document::{Document, History, Result},
+    preview::Preview,
+};
+use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, StrokeKind, Vec2};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+const ACCENT: Color32 = Color32::from_rgb(45, 206, 183);
+struct Page {
+    doc: Document,
+    history: History,
+    selected: usize,
+    source: String,
+    draft: bool,
+}
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Settings {
+    root: PathBuf,
+    executable: PathBuf,
+}
+pub struct Studio {
+    pages: Vec<Page>,
+    active: usize,
+    settings: Settings,
+    settings_path: PathBuf,
+    log_path: PathBuf,
+    status: String,
+    files: HashMap<PathBuf, Vec<PathBuf>>,
+    zoom: f32,
+    pan: Vec2,
+    grid: bool,
+    snap: bool,
+    grid_size: f32,
+    code: bool,
+    show_native: bool,
+    live: bool,
+    preview: Preview,
+    texture: Option<egui::TextureHandle>,
+    asset: Option<egui::TextureHandle>,
+    property_key: String,
+    property_value: String,
+    add_dialog: bool,
+    new_type: String,
+    new_id: String,
+    drag: Option<(usize, Rect, bool)>,
+    boxes: Vec<Rect>,
+    pending: Option<Instant>,
+    smoke: bool,
+    frames: u32,
+    closing: bool,
+}
+impl Studio {
+    pub fn new(cc: &eframe::CreationContext<'_>, log_path: PathBuf, smoke: bool) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        cc.egui_ctx.style_mut(|s| {
+            s.spacing.item_spacing = Vec2::new(8.0, 7.0);
+            s.spacing.button_padding = Vec2::new(10.0, 6.0);
+            s.visuals.panel_fill = Color32::from_rgb(24, 34, 44);
+            s.visuals.window_fill = Color32::from_rgb(28, 40, 51);
+            s.visuals.selection.bg_fill = Color32::from_rgb(30, 91, 101);
+        });
+        let settings_path = log_path.with_file_name("nextgen-studio.settings.json");
+        let settings = if smoke {
+            Settings::default()
+        } else {
+            std::fs::read(&settings_path)
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_default()
+        };
+        let mut s = Self {
+            pages: vec![],
+            active: 0,
+            settings,
+            settings_path,
+            log_path,
+            status: "Pronto • nenhum arquivo do cliente foi alterado".into(),
+            files: HashMap::new(),
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+            grid: true,
+            snap: true,
+            grid_size: 8.0,
+            code: false,
+            show_native: false,
+            live: true,
+            preview: Preview::default(),
+            texture: None,
+            asset: None,
+            property_key: String::new(),
+            property_value: String::new(),
+            add_dialog: false,
+            new_type: "Button".into(),
+            new_id: "novoElemento".into(),
+            drag: None,
+            boxes: vec![],
+            pending: None,
+            smoke,
+            frames: 0,
+            closing: false,
+        };
+        s.new_document();
+        if !smoke {
+            if let Some(p) = std::env::args().skip(1).find(|a| !a.starts_with('-')) {
+                s.open(Path::new(&p));
+            }
+        }
+        s
+    }
+    fn report(&mut self, result: Result<()>) {
+        if let Err(e) = result {
+            log::error!("{e}");
+            self.status = e;
+        } else {
+            self.status = "Alteração aplicada".into();
+            self.pending = Some(Instant::now());
+        }
+    }
+    fn new_document(&mut self) {
+        if self.pages.len() >= 8 {
+            self.status = "Limite de oito documentos.".into();
+            return;
+        }
+        let mut doc = Document::parse(include_bytes!("../examples/welcome.otui"), true).unwrap();
+        doc.mark_new();
+        self.pages.push(Page {
+            source: doc.text(),
+            doc,
+            history: History::default(),
+            selected: 0,
+            draft: false,
+        });
+        self.active = self.pages.len() - 1;
+    }
+    fn open(&mut self, p: &Path) {
+        if let Ok(c) = std::fs::canonicalize(p) {
+            if let Some(n) = self
+                .pages
+                .iter()
+                .position(|p| p.doc.path.as_ref() == Some(&c))
+            {
+                self.active = n;
+                return;
+            }
+        }
+        if self.pages.len() >= 8 {
+            self.status = "Feche uma aba antes de abrir outro documento.".into();
+            return;
+        }
+        match Document::load(p) {
+            Ok(doc) => {
+                self.code = !doc.is_otui;
+                self.pages.push(Page {
+                    source: doc.text(),
+                    doc,
+                    history: History::default(),
+                    selected: 0,
+                    draft: false,
+                });
+                self.active = self.pages.len() - 1;
+                self.status = format!("Aberto: {}", p.display());
+                log::info!("{}", self.status);
+            }
+            Err(e) => self.report(Err(e)),
+        }
+    }
+    fn mutate(&mut self, label: &str, op: impl FnOnce(&mut Document) -> Result<()>) {
+        if let Some(p) = self.pages.get_mut(self.active) {
+            let result = p.history.apply(&mut p.doc, label, op);
+            if result.is_ok() {
+                p.source = p.doc.text();
+                p.draft = false;
+            }
+            self.report(result);
+        }
+    }
+    fn undo(&mut self, redo: bool) {
+        if let Some(p) = self.pages.get_mut(self.active) {
+            let r = if redo {
+                p.history.redo(&mut p.doc)
+            } else {
+                p.history.undo(&mut p.doc)
+            };
+            p.source = p.doc.text();
+            self.report(r);
+        }
+    }
+    fn save(&mut self, save_as: bool) -> bool {
+        if self.pages.get(self.active).is_some_and(|p| p.draft) {
+            let text = self.pages[self.active].source.clone();
+            self.mutate("Editar código", |d| d.replace_text(&text));
+            if self.pages[self.active].draft {
+                return false;
+            }
+        }
+        let Some(p) = self.pages.get(self.active) else {
+            return true;
+        };
+        let target = if save_as || p.doc.path.is_none() {
+            rfd::FileDialog::new()
+                .set_directory(&self.settings.root)
+                .set_file_name(
+                    p.doc
+                        .path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .and_then(|x| x.to_str())
+                        .unwrap_or("interface.otui"),
+                )
+                .save_file()
+        } else {
+            p.doc.path.clone()
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        if self.pages.iter().enumerate().any(|(i, p)| {
+            i != self.active
+                && p.doc
+                    .path
+                    .as_ref()
+                    .is_some_and(|p| std::fs::canonicalize(&target).is_ok_and(|t| t == *p))
+        }) {
+            self.report(Err("Destino aberto em outra aba.".into()));
+            return false;
+        }
+        let r = self.pages[self.active].doc.save(&target, true);
+        let ok = r.is_ok();
+        if ok {
+            self.status = format!("Salvo: {}", target.display());
+            log::info!("{}", self.status);
+            self.pending = Some(Instant::now());
+        } else {
+            self.report(r);
+        }
+        ok
+    }
+    fn confirm_page(&mut self) -> bool {
+        if !self
+            .pages
+            .get(self.active)
+            .is_some_and(|p| p.doc.dirty() || p.draft)
+        {
+            return true;
+        }
+        match rfd::MessageDialog::new()
+            .set_title("Alterações pendentes")
+            .set_description("Salvar as alterações deste documento?")
+            .set_buttons(rfd::MessageButtons::YesNoCancel)
+            .show()
+        {
+            rfd::MessageDialogResult::Yes => self.save(false),
+            rfd::MessageDialogResult::No => true,
+            _ => false,
+        }
+    }
+    fn close_page(&mut self) {
+        if self.confirm_page() {
+            self.pages.remove(self.active);
+            self.active = self.active.saturating_sub(1);
+        }
+    }
+    fn image(&mut self, ctx: &egui::Context, p: &Path, native: bool) {
+        let result = (|| {
+            let reader = image::ImageReader::open(p)
+                .map_err(|e| e.to_string())?
+                .with_guessed_format()
+                .map_err(|e| e.to_string())?;
+            let size = reader.into_dimensions().map_err(|e| e.to_string())?;
+            if u64::from(size.0) * u64::from(size.1) > 16_000_000 {
+                return Err("Imagem excede 16 milhões de pixels.".into());
+            }
+            let decoded = image::ImageReader::open(p)
+                .map_err(|e| e.to_string())?
+                .decode()
+                .map_err(|e| e.to_string())?;
+            let resized = if native {
+                decoded.thumbnail(1600, 1200)
+            } else {
+                decoded.thumbnail(320, 240)
+            };
+            let rgba = resized.to_rgba8();
+            let color = egui::ColorImage::from_rgba_unmultiplied(
+                [rgba.width() as usize, rgba.height() as usize],
+                rgba.as_raw(),
+            );
+            Ok(ctx.load_texture(
+                if native { "motor" } else { "asset" },
+                color,
+                egui::TextureOptions::NEAREST,
+            ))
+        })();
+        match result {
+            Ok(t) => {
+                if native {
+                    self.texture = Some(t)
+                } else {
+                    self.asset = Some(t)
+                }
+            }
+            Err(e) => self.status = e,
+        }
+    }
+    fn tree(&mut self, ui: &mut egui::Ui, dir: &Path, depth: usize) {
+        if depth > 12 {
+            return;
+        }
+        if !self.files.contains_key(dir) {
+            let mut list: Vec<PathBuf> = std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter(|e| !e.file_type().is_ok_and(|t| t.is_symlink()))
+                .map(|e| e.path())
+                .filter(|p| {
+                    !p.file_name()
+                        .is_some_and(|s| s.to_string_lossy().starts_with('.'))
+                })
+                .take(2000)
+                .collect();
+            list.sort();
+            self.files.insert(dir.into(), list);
+        }
+        for p in self.files.get(dir).cloned().unwrap_or_default() {
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if p.is_dir() {
+                egui::CollapsingHeader::new(name)
+                    .id_salt(&p)
+                    .show(ui, |ui| self.tree(ui, &p, depth + 1));
+            } else {
+                let ext = p
+                    .extension()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
+                if [
+                    "otui", "lua", "otmod", "html", "css", "txt", "png", "jpg", "jpeg",
+                ]
+                .contains(&ext.as_str())
+                    && ui.selectable_label(false, name).double_clicked()
+                {
+                    if ["png", "jpg", "jpeg"].contains(&ext.as_str()) {
+                        self.image(ui.ctx(), &p, false);
+                    } else {
+                        self.open(&p);
+                    }
+                }
+            }
+        }
+    }
+    fn start_preview(&mut self) {
+        if self.settings.root.as_os_str().is_empty() {
+            self.status = "Abra um projeto antes de iniciar a prévia.".into();
+            return;
+        }
+        if !self.preview.running() {
+            if !self.settings.executable.is_file() {
+                let Some(p) = rfd::FileDialog::new()
+                    .set_directory(&self.settings.root)
+                    .set_title("Executável NextGen")
+                    .pick_file()
+                else {
+                    return;
+                };
+                self.settings.executable = p;
+            }
+            if rfd::MessageDialog::new().set_title("Prévia isolada").set_description("Instalar a integração dev_studio_bridge e iniciar uma janela separada do NextGen? Ela executará os scripts do projeto. Use somente projetos confiáveis.").set_buttons(rfd::MessageButtons::YesNo).show()!=rfd::MessageDialogResult::Yes{return;}
+            let r = self
+                .preview
+                .start(&self.settings.root, &self.settings.executable);
+            if r.is_err() {
+                self.report(r);
+                return;
+            }
+        }
+        self.send_preview();
+        self.show_native = true;
+    }
+    fn send_preview(&mut self) {
+        if let Some(p) = self.pages.get(self.active) {
+            if p.doc.is_otui {
+                let r = self.preview.send(&p.doc.text());
+                if let Err(e) = r {
+                    self.status = e;
+                }
+            }
+        }
+    }
+    fn geometry(&self) -> Vec<Rect> {
+        let Some(page) = self.pages.get(self.active) else {
+            return vec![];
+        };
+        let d = &page.doc;
+        let mut boxes = vec![Rect::NOTHING; d.nodes.len().min(3000)];
+        for (i, n) in d.nodes.iter().take(3000).enumerate() {
+            if !n.widget {
+                continue;
+            }
+            let num = |key: &str, default: f32| {
+                d.value(i, key)
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|n| n.is_finite())
+                    .unwrap_or(default)
+                    .clamp(-8192.0, 8192.0)
+            };
+            let root = n.parent.is_none();
+            let mut w = num("width", if root { 620.0 } else { 140.0 });
+            let mut h = num("height", if root { 400.0 } else { 36.0 });
+            let size: Vec<_> = d
+                .value(i, "size")
+                .split_whitespace()
+                .filter_map(|n| n.parse::<f32>().ok())
+                .collect();
+            if size.len() == 2 {
+                w = size[0].clamp(1.0, 8192.0);
+                h = size[1].clamp(1.0, 8192.0);
+            }
+            let parent = n
+                .parent
+                .and_then(|p| boxes.get(p).copied())
+                .filter(|r| r.is_finite())
+                .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 640.0)));
+            let mut x = num("margin-left", if root { 0.0 } else { 16.0 });
+            let mut y = num(
+                "margin-top",
+                if root {
+                    0.0
+                } else {
+                    40.0 + (i % 5) as f32 * 40.0
+                },
+            );
+            if d.value(i, "anchors.right") == "parent.right" {
+                x = parent.width() - w - num("margin-right", 0.0);
+            }
+            if d.value(i, "anchors.bottom") == "parent.bottom" {
+                y = parent.height() - h - num("margin-bottom", 0.0);
+            }
+            if d.value(i, "anchors.fill") == "parent" {
+                x = 0.0;
+                y = 0.0;
+                w = parent.width();
+                h = parent.height();
+            }
+            if d.value(i, "anchors.centerIn") == "parent" {
+                x = (parent.width() - w) / 2.0;
+                y = (parent.height() - h) / 2.0;
+            }
+            boxes[i] = Rect::from_min_size(
+                parent.min + Vec2::new(x, y),
+                Vec2::new(w.max(1.0), h.max(1.0)),
+            );
+        }
+        boxes
+    }
+    fn canvas(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("ESQUEMA OTUI");
+            ui.checkbox(&mut self.grid, "Grid");
+            ui.checkbox(&mut self.snap, "Snapping");
+            ui.add(
+                egui::DragValue::new(&mut self.grid_size)
+                    .range(1.0..=64.0)
+                    .suffix(" px"),
+            );
+            ui.add(egui::Slider::new(&mut self.zoom, 0.25..=2.5).text("Zoom"));
+            if ui.button("Centralizar").clicked() {
+                self.pan = Vec2::ZERO;
+                self.zoom = 1.0;
+            }
+        });
+        ui.label(egui::RichText::new("Estilos, imagens e Lua são renderizados na prévia nativa. Arraste com botão do meio para navegar.").small().color(Color32::GRAY));
+        let (response, painter) =
+            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let area = response.rect;
+        let origin = area.min + Vec2::new(28.0, 24.0) + self.pan;
+        painter.rect_filled(area, 0.0, Color32::from_rgb(15, 23, 31));
+        if self.grid {
+            let step = (self.grid_size * self.zoom).max(6.0);
+            let mut x = area.left() + (origin.x - area.left()).rem_euclid(step);
+            while x < area.right() {
+                let mut y = area.top() + (origin.y - area.top()).rem_euclid(step);
+                while y < area.bottom() {
+                    painter.circle_filled(Pos2::new(x, y), 0.6, Color32::from_rgb(46, 63, 77));
+                    y += step;
+                }
+                x += step;
+            }
+        }
+        if response.dragged_by(egui::PointerButton::Middle) {
+            self.pan += ui.input(|i| i.pointer.delta());
+        }
+        if response.hovered() {
+            let wheel = ui.input(|i| {
+                if i.modifiers.ctrl {
+                    i.raw_scroll_delta.y
+                } else {
+                    0.0
+                }
+            });
+            if wheel != 0.0 {
+                self.zoom = (self.zoom * (1.0 + wheel * 0.002)).clamp(0.25, 2.5);
+            }
+        }
+        self.boxes = self.geometry();
+        if self.pages.get(self.active).is_none() {
+            return;
+        }
+        if let Some(pos) = response.interact_pointer_pos() {
+            let local = Pos2::ZERO + (pos - origin) / self.zoom;
+            if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
+                if let Some(n) = self.boxes.iter().rposition(|b| b.contains(local)) {
+                    self.pages[self.active].selected = n;
+                    let r = self.boxes[n];
+                    let resize = local.distance(r.max) < 12.0 / self.zoom;
+                    let d = &self.pages[self.active].doc;
+                    let node = &d.nodes[n];
+                    let managed = node
+                        .properties
+                        .iter()
+                        .any(|p| p.key.starts_with("anchors."))
+                        || node.parent.is_some_and(|p| {
+                            d.nodes[p].properties.iter().any(|p| p.key == "layout")
+                        });
+                    if response.drag_started_by(egui::PointerButton::Primary)
+                        && !managed
+                        && (resize || node.parent.is_some())
+                    {
+                        self.drag = Some((n, r, resize));
+                    } else if managed && response.drag_started() {
+                        self.status="Geometria controlada por anchors/layout: edite as propriedades sem quebrar o vínculo.".into();
+                    }
+                }
+            }
+        }
+        if let Some((n, original, resize)) = self.drag {
+            let delta = response.drag_delta() / self.zoom;
+            let snap = |v: f32| {
+                if self.snap {
+                    (v / self.grid_size).round() * self.grid_size
+                } else {
+                    v.round()
+                }
+            };
+            let mut r = original;
+            if resize {
+                r.max = r.min
+                    + Vec2::new(
+                        snap(original.width() + delta.x).max(8.0),
+                        snap(original.height() + delta.y).max(8.0),
+                    );
+            } else {
+                r = r.translate(Vec2::new(snap(delta.x), snap(delta.y)));
+            }
+            if let Some(b) = self.boxes.get_mut(n) {
+                *b = r;
+            }
+            if response.drag_stopped() {
+                let parent = self.pages[self.active].doc.nodes[n]
+                    .parent
+                    .and_then(|p| self.boxes.get(p))
+                    .map_or(Pos2::ZERO, |r| r.min);
+                if resize {
+                    self.mutate("Redimensionar", |d| {
+                        d.set(
+                            n,
+                            "size",
+                            &format!("{} {}", r.width() as i32, r.height() as i32),
+                        )
+                    });
+                } else {
+                    let p = r.min - parent;
+                    self.mutate("Mover", |d| {
+                        d.set(n, "margin-left", &format!("{}", p.x as i32))?;
+                        d.set(n, "margin-top", &format!("{}", p.y as i32))
+                    });
+                }
+                self.drag = None;
+            }
+        }
+        let page = &self.pages[self.active];
+        for (i, b) in self.boxes.iter().enumerate() {
+            if !b.is_finite() {
+                continue;
+            }
+            let r = Rect::from_min_size(origin + b.min.to_vec2() * self.zoom, b.size() * self.zoom);
+            if !r.intersects(area) {
+                continue;
+            }
+            let n = &page.doc.nodes[i];
+            let label = if page.doc.value(i, "text").is_empty() {
+                page.doc.value(i, "id")
+            } else {
+                page.doc.value(i, "text")
+            };
+            if !n.name.contains("Label") {
+                painter.rect_filled(r, 3.0, Color32::from_rgb(34, 49, 63));
+                painter.rect_stroke(
+                    r,
+                    3.0,
+                    Stroke::new(1.0, Color32::from_rgb(68, 89, 106)),
+                    StrokeKind::Inside,
+                );
+            }
+            painter.with_clip_rect(r.intersect(area)).text(
+                if n.parent.is_none() {
+                    r.min + Vec2::splat(8.0)
+                } else {
+                    r.center()
+                },
+                if n.parent.is_none() {
+                    Align2::LEFT_TOP
+                } else {
+                    Align2::CENTER_CENTER
+                },
+                label,
+                FontId::proportional(13.0 * self.zoom),
+                Color32::from_rgb(220, 231, 239),
+            );
+            if i == page.selected {
+                painter.rect_stroke(r, 0.0, Stroke::new(1.5, ACCENT), StrokeKind::Inside);
+                painter.rect_filled(Rect::from_center_size(r.max, Vec2::splat(7.0)), 0.0, ACCENT);
+            }
+        }
+    }
+    fn properties(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Propriedades");
+        let Some(page) = self.pages.get(self.active) else {
+            return;
+        };
+        let n = page.selected;
+        let Some(node) = page.doc.nodes.get(n).cloned() else {
+            ui.label("Este documento é editado em Código.");
+            return;
+        };
+        ui.label(egui::RichText::new(&node.name).color(ACCENT));
+        egui::ScrollArea::vertical()
+            .id_salt("properties")
+            .max_height(ui.available_height() * 0.6)
+            .show(ui, |ui| {
+                for property in node.properties {
+                    ui.label(&property.key);
+                    let id = egui::Id::new(("property", self.active, n, &property.key));
+                    let mut value = ui
+                        .memory(|m| m.data.get_temp::<String>(id))
+                        .unwrap_or_else(|| property.value.clone());
+                    let r = ui.add_enabled(
+                        !property.block,
+                        egui::TextEdit::singleline(&mut value)
+                            .id(id)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if r.changed() {
+                        ui.memory_mut(|m| m.data.insert_temp(id, value.clone()));
+                    }
+                    if r.lost_focus() {
+                        ui.memory_mut(|m| m.data.remove::<String>(id));
+                        if value != property.value {
+                            self.mutate("Alterar propriedade", |d| d.set(n, &property.key, &value));
+                        }
+                    }
+                }
+            });
+        ui.separator();
+        ui.label("Adicionar / definir propriedade");
+        ui.text_edit_singleline(&mut self.property_key);
+        ui.text_edit_singleline(&mut self.property_value);
+        if ui.button("Aplicar propriedade").clicked() {
+            let k = self.property_key.clone();
+            let v = self.property_value.clone();
+            self.mutate("Definir propriedade", |d| d.set(n, &k, &v));
+        }
+        ui.separator();
+        ui.label("Anchors — vínculo ao pai");
+        ui.horizontal_wrapped(|ui| {
+            for (label, key, value) in [
+                ("Esquerda", "anchors.left", "parent.left"),
+                ("Topo", "anchors.top", "parent.top"),
+                ("Direita", "anchors.right", "parent.right"),
+                ("Base", "anchors.bottom", "parent.bottom"),
+                ("Centro", "anchors.centerIn", "parent"),
+                ("Preencher", "anchors.fill", "parent"),
+            ] {
+                if ui.button(label).clicked() {
+                    self.mutate("Definir anchor", |d| d.set(n, key, value));
+                }
+            }
+        });
+        ui.label("Margens e tamanho: use margin-left/top/right/bottom e size.");
+        if ui.button("Excluir elemento").clicked() {
+            self.mutate("Excluir elemento", |d| d.remove(n));
+        }
+    }
+}
+impl eframe::App for Studio {
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = root.ctx().clone();
+        self.frames += 1;
+        if ctx.input(|i| i.viewport().close_requested()) && !self.closing && !self.smoke {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            let mut allowed = true;
+            for i in 0..self.pages.len() {
+                self.active = i;
+                if !self.confirm_page() {
+                    allowed = false;
+                    break;
+                }
+            }
+            if allowed {
+                self.closing = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+        if let Some(image) = self.preview.poll() {
+            self.image(&ctx, &image, true);
+        }
+        if self.preview.running() {
+            ctx.request_repaint_after(Duration::from_millis(350));
+        }
+        if self
+            .pending
+            .is_some_and(|t| t.elapsed() > Duration::from_millis(400))
+        {
+            if self.live && self.preview.running() {
+                self.send_preview();
+            }
+            self.pending = None;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
+            self.start_preview();
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
+            self.save(false);
+        }
+        if !ctx.wants_keyboard_input() {
+            if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
+                self.undo(false);
+            }
+            if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Y)) {
+                self.undo(true);
+            }
+        }
+        egui::TopBottomPanel::top("toolbar").show(root, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("NEXTGEN  STUDIO")
+                        .strong()
+                        .color(ACCENT),
+                );
+                ui.label("RUST • 0.2");
+                if ui.button("Novo").clicked() {
+                    self.new_document();
+                }
+                if ui.button("Abrir…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new()
+                        .add_filter("Módulos", &["otui", "lua", "otmod", "html", "css"])
+                        .pick_file()
+                    {
+                        self.open(&p);
+                    }
+                }
+                if ui.button("Salvar").clicked() {
+                    self.save(false);
+                }
+                if ui.button("Salvar como…").clicked() {
+                    self.save(true);
+                }
+                if ui.button("Desfazer").clicked() {
+                    self.undo(false);
+                }
+                if ui.button("Refazer").clicked() {
+                    self.undo(true);
+                }
+                if ui.button("+ Elemento").clicked() {
+                    self.add_dialog = true;
+                }
+                if ui.button("Prévia nativa • F5").clicked() {
+                    self.start_preview();
+                }
+            });
+        });
+        egui::TopBottomPanel::bottom("status").show(root, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(&self.status);
+                ui.separator();
+                ui.label(if cfg!(debug_assertions) {
+                    "DEBUG • console ativo"
+                } else {
+                    "RELEASE"
+                });
+            });
+        });
+        egui::TopBottomPanel::bottom("diagnostics")
+            .resizable(true)
+            .default_height(130.0)
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("Diagnóstico");
+                    ui.label(&self.preview.status);
+                    ui.checkbox(&mut self.live, "Atualizar motor após edições");
+                    if ui.button("Parar prévia").clicked() {
+                        self.preview.stop();
+                    }
+                    if ui.button("Local do log").clicked() {
+                        self.status = self.log_path.display().to_string();
+                    }
+                });
+                if let Some(p) = self.pages.get(self.active) {
+                    egui::ScrollArea::vertical()
+                        .id_salt("issues")
+                        .show(ui, |ui| {
+                            for issue in &p.doc.issues {
+                                ui.colored_label(Color32::YELLOW, issue);
+                            }
+                            ui.label(format!(
+                                "{} • {} nós • {:.1} KiB",
+                                p.doc.encoding(),
+                                p.doc.nodes.len(),
+                                p.doc.bytes().len() as f32 / 1024.0
+                            ));
+                            ui.collapsing("Histórico", |ui| {
+                                for label in p.history.labels() {
+                                    ui.label(label);
+                                }
+                            });
+                        });
+                }
+            });
+        egui::SidePanel::left("project")
+            .resizable(true)
+            .default_width(240.0)
+            .show(root, |ui| {
+                ui.heading("Projeto");
+                ui.horizontal(|ui| {
+                    if ui.button("Abrir projeto…").clicked() {
+                        if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                            self.settings.root = p;
+                            self.files.clear();
+                        }
+                    }
+                    if ui.small_button("↻").clicked() {
+                        self.files.clear();
+                    }
+                });
+                let project = self.settings.root.clone();
+                egui::ScrollArea::vertical()
+                    .id_salt("files")
+                    .max_height(ui.available_height() * 0.42)
+                    .show(ui, |ui| {
+                        if project.is_dir() {
+                            self.tree(ui, &project, 0);
+                        } else {
+                            ui.label("Selecione a pasta do NextGen.");
+                        }
+                    });
+                ui.separator();
+                ui.heading("Hierarquia");
+                if let Some(p) = self.pages.get_mut(self.active) {
+                    egui::ScrollArea::vertical().id_salt("tree").show(ui, |ui| {
+                        for (i, n) in p.doc.nodes.iter().take(10000).enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.add_space((n.indent.min(24) * 5) as f32);
+                                if ui
+                                    .selectable_label(
+                                        p.selected == i,
+                                        format!("{}  {}", n.name, p.doc.value(i, "id")),
+                                    )
+                                    .clicked()
+                                {
+                                    p.selected = i;
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        egui::SidePanel::right("inspector")
+            .resizable(true)
+            .default_width(280.0)
+            .show(root, |ui| {
+                self.properties(ui);
+                ui.separator();
+                if let Some(t) = &self.asset {
+                    ui.add(
+                        egui::Image::new(t)
+                            .fit_to_exact_size(Vec2::new(240.0, 160.0))
+                            .maintain_aspect_ratio(true),
+                    );
+                }
+            });
+        egui::CentralPanel::default().show(root,|ui|{
+            ui.horizontal_wrapped(|ui|{
+                for (i,p) in self.pages.iter().enumerate(){let name=p.doc.path.as_ref().and_then(|p|p.file_name()).map(|s|s.to_string_lossy().into_owned()).unwrap_or("Novo documento".into());
+                    if ui.selectable_label(self.active==i,format!("{name}{}",if p.doc.dirty()||p.draft{" *"}else{""})).clicked(){self.active=i;}}
+                if ui.small_button("Fechar aba").clicked(){self.close_page();}
+            });
+            ui.separator();ui.horizontal(|ui|{
+                if ui.selectable_label(!self.code&&!self.show_native,"Design").clicked(){self.code=false;self.show_native=false;}
+                if ui.selectable_label(self.code,"Código").clicked(){self.code=true;self.show_native=false;}
+                if ui.selectable_label(self.show_native,"Captura nativa").clicked(){self.show_native=true;self.code=false;}
+            });
+            if self.show_native{
+                ui.label("Imagem renderizada pelo processo NextGen • interação na janela separada do cliente.");
+                ui.label("Não é vídeo contínuo: a captura é renovada após cada revisão.");
+                if let Some(t)=&self.texture{ui.add(egui::Image::new(t).max_size(ui.available_size()).maintain_aspect_ratio(true));}else{ui.label("Inicie a prévia nativa com F5 para receber a captura.");}
+            }else if self.code||self.pages.get(self.active).is_some_and(|p|!p.doc.is_otui){
+                if let Some(p)=self.pages.get_mut(self.active){
+                    ui.label("Código OTUI / Lua / OTMOD • aplicar registra uma única ação no histórico.");
+                    let apply=ui.button("Aplicar código").clicked();
+                    egui::ScrollArea::both().id_salt("source").show(ui,|ui|{if ui.add(egui::TextEdit::multiline(&mut p.source).code_editor().desired_width(f32::INFINITY).desired_rows(32)).changed(){p.draft=true;}});
+                    if apply{let text=p.source.clone();self.mutate("Editar código",|d|d.replace_text(&text));}
+                }
+            }else{self.canvas(ui);}
+        });
+        if self.add_dialog {
+            let mut open = true;
+            egui::Window::new("Adicionar elemento")
+                .open(&mut open)
+                .show(&ctx, |ui| {
+                    ui.label("Tipo de widget");
+                    ui.text_edit_singleline(&mut self.new_type);
+                    ui.label("ID");
+                    ui.text_edit_singleline(&mut self.new_id);
+                    if ui.button("Adicionar ao selecionado").clicked() {
+                        let kind = self.new_type.clone();
+                        let id = self.new_id.clone();
+                        let n = self.pages.get(self.active).map(|p| p.selected);
+                        self.mutate("Adicionar elemento", |d| d.add(n, &kind, &id));
+                        self.add_dialog = false;
+                    }
+                });
+            self.add_dialog &= open;
+        }
+        if self.smoke {
+            ctx.request_repaint_after(Duration::from_millis(30));
+            if self.frames > 5 {
+                log::info!("Desktop smoke passed");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.preview.stop();
+        if !self.smoke {
+            if let Ok(bytes) = serde_json::to_vec_pretty(&self.settings) {
+                let _ = crate::document::atomic_write(&self.settings_path, &bytes);
+            }
+        }
+        log::info!("Encerramento normal");
+        log::logger().flush();
+    }
+}

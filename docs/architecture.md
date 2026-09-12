@@ -1,3 +1,7 @@
+# Arquitetura histórica C++/Qt 0.1
+
+Este documento descreve a versão anterior. A implementação atual está em [migração Rust](rust-migration.md).
+
 # Arquitetura e evolução
 
 ## Decisão de tecnologia

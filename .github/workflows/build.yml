@@ -3,98 +3,74 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-    paths-ignore: ['docs/**', '*.md']
+    paths-ignore: ['docs/**']
   pull_request:
-    paths-ignore: ['docs/**', '*.md']
+    paths-ignore: ['docs/**']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  group: desktop-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
     name: ${{ matrix.platform }} / ${{ matrix.config }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         config: [Debug, Release]
+        os: [windows-2022, ubuntu-24.04]
         include:
           - os: windows-2022
             platform: Windows-x64
-            arch: win64_msvc2022_64
-            archives: qtbase
-            cache: sccache
           - os: ubuntu-24.04
             platform: Linux-x64
-            arch: linux_gcc_64
-            archives: qtbase icu
-            cache: ccache
-        os: [windows-2022, ubuntu-24.04]
     defaults:
       run:
         shell: pwsh
     env:
-      QT_QPA_PLATFORM: offscreen
-      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CARGO_BUILD_JOBS: 2
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: MSVC environment
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
-        with:
-          arch: x64
-      - name: Linux runtime dependencies
+      - name: Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ninja-build patchelf xvfb xauth libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0
-      - name: Qt SDK (precompiled, cached)
-        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libgl1-mesa-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev xvfb xauth
+      - name: Install pinned stable Rust
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+      - name: Rust dependency and build cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with:
-          version: '6.8.3'
-          arch: ${{ matrix.arch }}
-          archives: ${{ matrix.archives }}
-          cache: true
-          cache-key-prefix: studio-qt-v1
-          install-deps: true
-      - name: Compiler cache
-        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03
-        with:
-          variant: ${{ matrix.cache }}
-          key: studio-v1-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.config }}-qt6.8.3
-          max-size: 500M
-          save: ${{ github.event_name != 'pull_request' }}
-      - name: Configure
-        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DCMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.cache }} -DSTUDIO_DEPLOY_RUNTIME=ON -DBUILD_TESTING=ON
-      - name: Build
-        run: cmake --build build/ci --parallel 2
-      - name: Tests
-        run: ctest --test-dir build/ci --output-on-failure --output-junit test-results.xml
-      - name: Install and package
+          key: studio-rust-v1-${{ matrix.platform }}-${{ matrix.config }}
+          save-if: ${{ github.event_name != 'pull_request' }}
+          cache-on-failure: true
+      - name: Format
+        run: cargo fmt --check
+      - name: Build and test
         run: |
-          cmake --install build/ci --prefix "$PWD/staging"
+          $profile = if ("${{ matrix.config }}" -eq "Release") { "release" } else { "dev" }
+          cargo build --locked --profile $profile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/package.py --platform ${{ matrix.platform }} --config ${{ matrix.config }}
+          cargo test --locked --profile $profile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Packaged application smoke test
+      - name: Package
+        run: python tools/package.py --platform ${{ matrix.platform }} --config ${{ matrix.config }}
+      - name: Test installed application
         run: |
           $binary = if ($IsWindows) { "./staging/bin/nextgen-studio.exe" } else { "./staging/bin/nextgen-studio" }
-          $qtPath = $env:QT_ROOT_DIR
-          if ($qtPath) {
-            $env:PATH = (($env:PATH -split [IO.Path]::PathSeparator) | Where-Object { !$_.StartsWith($qtPath, [StringComparison]::OrdinalIgnoreCase) }) -join [IO.Path]::PathSeparator
-          }
-          Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH, Env:LD_LIBRARY_PATH -ErrorAction SilentlyContinue
           if ($IsLinux) {
-            $env:QT_QPA_PLATFORM = "xcb"
-            & xvfb-run -a $binary --smoke-test --screenshot smoke.png
+            $env:LIBGL_ALWAYS_SOFTWARE = "1"
+            & xvfb-run -a $binary --smoke-test
           } else {
-            & $binary --smoke-test --screenshot smoke.png
+            & $binary --smoke-test
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path smoke.png)) { throw "Screenshot was not produced" }
+          if (!(Test-Path staging/bin/nextgen-studio.log)) { throw "Application did not create its log" }
+          if (!(Select-String -Path staging/bin/nextgen-studio.log -SimpleMatch "Desktop smoke passed" -Quiet)) { throw "UI smoke did not finish" }
       - name: Publish binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -103,23 +79,10 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
-      - name: Test evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: evidence-${{ matrix.platform }}-${{ matrix.config }}
-          path: |
-            smoke.png
-            build/ci/test-results.xml
-            build/ci/Testing/Temporary/LastTest.log
-          retention-days: 14
-
   release:
-    name: Publish preview release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
     permissions:
       actions: read
       contents: write
@@ -128,12 +91,15 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - name: Download tested packages
-        run: gh run download "$GITHUB_RUN_ID" --pattern 'NextGen-Studio-*' --dir artifacts
-      - name: Publish tagged preview
-        shell: bash
+      - run: gh run download "$GITHUB_RUN_ID" --pattern 'NextGen-Studio-*' --dir artifacts
+      - shell: bash
         run: |
           shopt -s globstar nullglob
           packages=(artifacts/**/*.zip artifacts/**/*.sha256)
           test "${#packages[@]}" -eq 8
-          gh release create "$RELEASE_TAG" "${packages[@]}" --verify-tag --prerelease --title "NextGen Studio $RELEASE_TAG" --notes "Previa inicial do editor desktop. Windows/Linux x64, Debug e Release. Use Release no dia a dia. Extraia o ZIP e execute bin/nextgen-studio. Linux: Ubuntu 24.04 ou ambiente compativel com glibc 2.39+. Windows Debug requer runtime de depuracao MSVC. O canvas e um esquema aproximado; integracao de previa nativa experimental. Consulte README.md e BUILD.json."
+          gh release create "$RELEASE_TAG" "${packages[@]}" --verify-tag --prerelease --title "NextGen Studio $RELEASE_TAG" --notes-file /dev/stdin <<'NOTES'
+          Editor desktop Rust. Windows/Linux x64, Debug/Release. Use Release no dia a dia.
+          Extraia o ZIP e execute bin/nextgen-studio. SHA-256 acompanha o ZIP.
+          Sem Qt/WebView. Console no Windows Debug; log nos dois modos.
+          Prévia nativa experimental requer NextGen configurado. Consulte README.md.
+          NOTES

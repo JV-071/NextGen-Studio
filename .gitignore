@@ -1,9 +1,8 @@
-/build/
+/target/
 /.cache/
 /dist/
-*.user
-*.log
-.DS_Store
-
 /staging/
-/smoke.png
+/build/
+*.log
+*.log.1
+*.settings.json
